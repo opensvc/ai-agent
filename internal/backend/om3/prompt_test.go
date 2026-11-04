@@ -49,3 +49,16 @@ func TestDocsPromptStandsApart(t *testing.T) {
 		}
 	}
 }
+
+// TestCodePromptStandsApart keeps search_code out of the prompt of a backend
+// with no code to search, and keeps usage questions on the documentation.
+func TestCodePromptStandsApart(t *testing.T) {
+	if strings.Contains(SystemPrompt, "search_code") || strings.Contains(DocsPrompt, "search_code") {
+		t.Error("a prompt offered without the code names search_code")
+	}
+	for _, rule := range []string{"search_code", "Before answering from memory", "Leave its version out, for the latest code, unless the user names a version", "not what the user should do", "answer from the documentation"} {
+		if !strings.Contains(CodePrompt, rule) {
+			t.Errorf("CodePrompt lacks %q", rule)
+		}
+	}
+}

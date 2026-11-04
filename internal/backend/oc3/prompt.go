@@ -34,3 +34,8 @@ const DocsPrompt = `For a question on how OpenSVC works, how to configure or do 
 // has no one version, and the model is told, when it reads the result, how
 // to search the book of the nodes the question is about.
 const DocsUnasked = "If the question is about given nodes, or the services on them, search again with version set to the agent_version the collector reports for them, read with get_node or list_nodes."
+
+// CodePrompt completes SystemPrompt when the agent has the code of the
+// daemon to search with search_code: without it, the model is offered no
+// such tool, and told nothing of it.
+const CodePrompt = `Before answering from memory how the agent daemon behaves, such as a timeout, a retry, an order or a decision of its own, or before saying the documentation does not say it, search the code of the daemon with search_code and answer from the declarations it returns. Leave its version out, for the latest code, unless the user names a version. The code tells what the daemon does, not what the user should do: for how to use or configure OpenSVC, answer from the documentation.`

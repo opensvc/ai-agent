@@ -49,7 +49,7 @@ func TestSearchDocsGivesTheSectionsOfTheBookOfTheVersionAsked(t *testing.T) {
 	}
 	source := &fixedDocs{library: library}
 	call := func(arguments string) llm.ToolResult {
-		result, err := searchDocs(context.Background(), source, nil, llm.ToolCall{ID: "1", Name: SearchDocsToolName, Arguments: json.RawMessage(arguments)})
+		result, err := searchDocs(context.Background(), source, nil, llm.ToolCall{ID: "1", Name: SearchDocsToolName, Arguments: json.RawMessage(arguments)}, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -145,7 +145,7 @@ func TestBooksSaysTheVersionOfTheBackendCouldNotBeRead(t *testing.T) {
 }
 
 func TestSearchDocsWithNoBookSaysTheDocumentationCannotBeRead(t *testing.T) {
-	result, err := searchDocs(context.Background(), Books{Shelf: &shelfOf{}}, nil, llm.ToolCall{ID: "1", Name: SearchDocsToolName, Arguments: json.RawMessage(`{"query":"quorum"}`)})
+	result, err := searchDocs(context.Background(), Books{Shelf: &shelfOf{}}, nil, llm.ToolCall{ID: "1", Name: SearchDocsToolName, Arguments: json.RawMessage(`{"query":"quorum"}`)}, "")
 	if err != nil || !result.IsError || !strings.Contains(toolText(t, result), "The documentation cannot be read at the moment") {
 		t.Errorf("result = %v %q", result.IsError, toolText(t, result))
 	}

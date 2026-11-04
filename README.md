@@ -87,6 +87,18 @@ the first time a search asks for it. A mirror of the book serves its own
 `versions.json` and `llms.txt`; see the
 [client contract](docs/api.md#documentation).
 
+With `OPENSVC_AI_CODE_URL`, the tar.gz archive of the om3 source code at a
+git reference, `{ref}` in it, such as
+`https://codeload.github.com/opensvc/om3/tar.gz/{ref}`, the `om3` and `oc3`
+backends offer the model `search_code`, a search of the Go source code of
+the daemon: its latest code, at `OPENSVC_AI_CODE_REF`, `main` by default,
+read again every 6 hours, unless the user names a version, a tag or a
+commit. The archive of a version is read the first time a search asks for
+it, in memory, and indexed by declaration, its tests and its generated code
+left out: about 50 MB kept per version, 100 MB while one is indexed, the
+latest code and one named version kept. A question searches the code 6
+times at most. A mirror serves the same archives at its own URL.
+
 For browser clients, set `OPENSVC_AI_CORS_ALLOWED_ORIGINS` to comma-separated
 webapp origins, or `*` to allow all origins. Empty by default. See the
 [browser client guide](docs/webapp.md#cors) for examples and restrictions.
@@ -104,6 +116,8 @@ webapp origins, or `*` to allow all origins. Empty by default. See the
 | `OPENSVC_AI_CONVERSATION_MAX_DATABASE_MIB` | `256` | `32` to `1048576` |
 | `OPENSVC_AI_OC3_MCP_SOCKET` | unset: `oc3` not served | absolute path |
 | `OPENSVC_AI_DOCS_URL` | unset: no documentation search | `https` URL of the root of the book, such as `https://book.opensvc.com/`; one naming its `llms.txt` is its directory |
+| `OPENSVC_AI_CODE_URL` | unset: no code search | `https` URL of a tar.gz archive of the om3 source holding `{ref}`, such as `https://codeload.github.com/opensvc/om3/tar.gz/{ref}` |
+| `OPENSVC_AI_CODE_REF` | `main` | git reference of the latest code, read when a code search names no version |
 | `OPENSVC_AI_CORS_ALLOWED_ORIGINS` | empty: no CORS | exact origins or `*` |
 | `OPENSVC_AI_MAX_CONCURRENT_ASKS` | `4` | 1 to 128 |
 | `OPENSVC_AI_SHUTDOWN_TIMEOUT` | `30s` | `1s` to `5m` |

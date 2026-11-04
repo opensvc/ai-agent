@@ -137,3 +137,16 @@ func TestClusterVersionReadsEveryPageOfNodes(t *testing.T) {
 		t.Errorf("no cursor: version = %q", got)
 	}
 }
+
+// TestClusterVersionIsTheOldestCommitInARollingUpgrade reads, of nodes of one
+// release line in a rolling upgrade, the oldest commit, whatever their order.
+func TestClusterVersionIsTheOldestCommitInARollingUpgrade(t *testing.T) {
+	for _, versions := range [][]string{
+		{"v3.0.0-rc47-2-gaaaaaaa", "v3.0.0-rc46-12-gbbbbbbb"},
+		{"v3.0.0-rc46-12-gbbbbbbb", "v3.0.0-rc47-2-gaaaaaaa"},
+	} {
+		if got, _ := NewClusterVersions().Version(clusterContext("c1"), &statusSession{versions: versions}); got != "v3.0.0-rc46-12-gbbbbbbb" {
+			t.Errorf("%v: version = %q", versions, got)
+		}
+	}
+}

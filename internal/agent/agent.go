@@ -51,6 +51,9 @@ type Config struct {
 	// Docs gives the documentation the model searches with search_docs;
 	// nil offers no such tool.
 	Docs DocsSource
+	// Code gives the source code of the daemon the model searches with
+	// search_code; nil offers no such tool.
+	Code CodeSource
 	// Now is the clock the events of a turn are stamped with, At; nil means
 	// time.Now. The stream, the audit and the history carry its times.
 	Now func() time.Time
@@ -236,6 +239,9 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 	if _, taken := selection.catalog[SearchDocsToolName]; taken && a.config.Docs != nil {
 		return result, fmt.Errorf("MCP tool %q conflicts with the documentation search of the agent", SearchDocsToolName)
 	}
+	if _, taken := selection.catalog[SearchCodeToolName]; taken && a.config.Code != nil {
+		return result, fmt.Errorf("MCP tool %q conflicts with the code search of the agent", SearchCodeToolName)
+	}
 	// The tools of the client are offered in every request of the turn,
 	// never searched; one named as a tool of the agent is refused.
 	offered, offeredNames, err := clientTools(clientToolsFrom(ctx), selection.known)
@@ -325,7 +331,13 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 				// The calls the source makes to give the book, such as the
 				// read of the version of the cluster, are audited.
 				audited := &auditedSession{MCPSession: session, emit: emit, iteration: state.Iteration, purpose: "documentation_version", listed: selection.catalog}
-				docsResult, err := searchDocs(ctx, a.config.Docs, audited, call)
+				// With the code searchable too, a search tells where to look
+				// for what the book does not say.
+				next := ""
+				if a.config.Code != nil {
+					next = docsThenCode
+				}
+				docsResult, err := searchDocs(ctx, a.config.Docs, audited, call, next)
 				if err != nil {
 					return false, fmt.Errorf("search the documentation: %w", err)
 				}
@@ -333,6 +345,21 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 					return false, err
 				}
 				state.Results = append(state.Results, docsResult)
+				continue
+			}
+			if a.config.Code != nil && call.Name == SearchCodeToolName {
+				if err := emitAgentEvent(emit, Event{Type: EventToolStarted, ToolName: call.Name, ToolCallID: call.ID, ToolArguments: call.Arguments, Iteration: state.Iteration}); err != nil {
+					return false, err
+				}
+				codeResult := llm.ToolResult{CallID: call.ID, Content: textToolResult(codeSearchesSpent), IsError: true}
+				if state.CodeSearches < maxCodeSearchesPerAsk {
+					state.CodeSearches++
+					codeResult = searchCode(ctx, a.config.Code, call)
+				}
+				if err := emitAgentEvent(emit, Event{Type: EventToolFinished, ToolName: call.Name, ToolError: codeResult.IsError, ToolCallID: call.ID, ToolResult: codeResult.Content, Iteration: state.Iteration}); err != nil {
+					return false, err
+				}
+				state.Results = append(state.Results, codeResult)
 				continue
 			}
 			if selection.search && call.Name == SearchToolName {
@@ -474,6 +501,12 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 			requestTools = append(requestTools, docsTool(a.config.Docs))
 			if !slices.Contains(selection.shown, SearchDocsToolName) {
 				selection.shown = append(selection.shown, SearchDocsToolName)
+			}
+		}
+		if a.config.Code != nil {
+			requestTools = append(requestTools, codeTool(a.config.Code))
+			if !slices.Contains(selection.shown, SearchCodeToolName) {
+				selection.shown = append(selection.shown, SearchCodeToolName)
 			}
 		}
 		requestTools = append(requestTools, offered...)

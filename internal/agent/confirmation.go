@@ -98,8 +98,11 @@ type SuspendedTurn struct {
 	Searches    int      `json:"searches,omitempty"`
 	// ToolSearch tells that the turn searched the catalog: it keeps
 	// searching when it resumes, so that its planned search calls run.
-	ToolSearch bool   `json:"tool_search,omitempty"`
-	ToolTitle  string `json:"tool_title"`
+	ToolSearch bool `json:"tool_search,omitempty"`
+	// CodeSearches is the count of the code searches of the question, bound
+	// by maxCodeSearchesPerAsk across its resumes.
+	CodeSearches int    `json:"code_searches,omitempty"`
+	ToolTitle    string `json:"tool_title"`
 	// ArgumentTypes are the media types the input schema of the pending
 	// tool gives its text arguments, for the client to show them.
 	ArgumentTypes map[string]string `json:"argument_types,omitempty"`
@@ -142,6 +145,9 @@ func (s SuspendedTurn) validate(maxIterations int) error {
 	}
 	if s.Searches < 0 || s.Searches > maxSearchesPerTurn || len(s.ActiveTools) > maxModelTools {
 		return fmt.Errorf("suspended turn tool search state is out of range")
+	}
+	if s.CodeSearches < 0 || s.CodeSearches > maxCodeSearchesPerAsk {
+		return fmt.Errorf("suspended turn code search count %d is out of range", s.CodeSearches)
 	}
 	if len(s.ArgumentTypes) > maxArgumentTypes {
 		return fmt.Errorf("suspended turn has more than %d argument types", maxArgumentTypes)
