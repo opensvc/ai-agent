@@ -323,3 +323,25 @@ func (emptyShelf) Lines() []string { return nil }
 func (emptyShelf) Book(context.Context, string) (*docs.Library, string) {
 	return nil, "The documentation could not be read."
 }
+
+// TestBooksTellsHowToNameTheVersionWhenNoneIsAsked follows the note of a
+// search that names no version, on a backend with no default, with how to
+// name one; a search naming one, or a backend with a default, has no such
+// hint.
+func TestBooksTellsHowToNameTheVersionWhenNoneIsAsked(t *testing.T) {
+	const hint = "If the question is about given nodes, search again with their version."
+	books := Books{Shelf: &shelfOf{library: quorumBook(t)}, Unasked: hint}
+	if _, says, _ := books.Docs(context.Background(), nil, ""); says != "No release line was asked: this is the book of the latest one, 3.1. "+hint {
+		t.Errorf("no version: says %q", says)
+	}
+	if _, says, _ := books.Docs(context.Background(), nil, "3.0"); strings.Contains(says, hint) {
+		t.Errorf("a version: says %q", says)
+	}
+	withDefault := Books{Shelf: &shelfOf{library: quorumBook(t)}, Unasked: hint, Default: func(context.Context, MCPSession) (string, error) { return "", nil }}
+	if _, says, _ := withDefault.Docs(context.Background(), nil, ""); strings.Contains(says, hint) {
+		t.Errorf("a default: says %q", says)
+	}
+	if _, says, _ := (Books{Shelf: emptyShelf{}, Unasked: hint}).Docs(context.Background(), nil, ""); strings.Contains(says, hint) {
+		t.Errorf("no book: says %q", says)
+	}
+}

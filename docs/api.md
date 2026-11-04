@@ -508,9 +508,11 @@ transport during the read ends the turn, as a failed call of the model does.
 The version is not read while the agent has no book. The `oc3` backend has
 no default, a fleet running several lines: its prompt asks the model to name
 the line of the `agent_version` the collector reports for the nodes
-concerned, and a search naming none gives the latest book. A version of a
-line newer than the latest book, of a line with no book, or naming no line,
-gets the latest book, the result saying so.
+concerned, and a search naming none gives the latest book, its result
+telling the model, when the question is about given nodes, to search again
+with their `agent_version`. A version of a line newer than the latest book,
+of a line with no book, or naming no line, gets the latest book, the result
+saying so.
 
 ## Skills
 
