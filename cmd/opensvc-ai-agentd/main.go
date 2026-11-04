@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/opensvc/ai-agent/internal/config"
 	"github.com/opensvc/ai-agent/internal/conversation"
 	conversationsqlite "github.com/opensvc/ai-agent/internal/conversation/sqlite"
+	"github.com/opensvc/ai-agent/internal/docs"
 	"github.com/opensvc/ai-agent/internal/llm"
 	"github.com/opensvc/ai-agent/internal/llmfactory"
 	"github.com/opensvc/ai-agent/internal/mcpclient"
@@ -57,14 +59,24 @@ func main() {
 	if err != nil {
 		log.Fatalf("load MCP configuration: %v", err)
 	}
+	docsConfig, err := config.LoadDocs()
+	if err != nil {
+		log.Fatalf("load documentation configuration: %v", err)
+	}
 
 	model, err := llmfactory.New(llmConfig, nil)
 	if err != nil {
 		log.Fatalf("create LLM client: %v", err)
 	}
+	var om3Docs *docs.Library
+	om3Prompt := om3.SystemPrompt
+	if library := loadDocs(docsConfig.URL); library != nil {
+		om3Docs = library
+		om3Prompt += "\n" + om3.DocsPrompt
+	}
 	// om3 is always served; oc3 only when its MCP socket is configured.
 	specs := []backendSpec{{
-		name: "om3", socketPath: mcpConfig.OM3SocketPath, systemPrompt: om3.SystemPrompt, newMCPClient: om3.NewMCPClient,
+		name: "om3", socketPath: mcpConfig.OM3SocketPath, systemPrompt: om3Prompt, docs: om3Docs, newMCPClient: om3.NewMCPClient,
 		newAuthenticator: func(client *mcpclient.Client) api.Authenticator { return om3.NewAuthenticator(client) },
 	}}
 	if mcpConfig.OC3SocketPath != "" {
@@ -93,7 +105,7 @@ func main() {
 		}
 		backend, service, err := newBackend(spec, model, conversationStore, agent.Config{
 			Backend: spec.name, SystemPrompt: spec.systemPrompt, MaxIterations: agentConfig.MaxIterations, Timeout: agentConfig.Timeout,
-			SearchThreshold: agentConfig.SearchThreshold, SearchScoreRatio: agentConfig.SearchScoreRatio,
+			SearchThreshold: agentConfig.SearchThreshold, SearchScoreRatio: agentConfig.SearchScoreRatio, Docs: spec.docs,
 		}, serviceConfig)
 		if err != nil {
 			cancelStartup()
@@ -171,11 +183,37 @@ func main() {
 // backendSpec describes one backend: its MCP socket and the rules of its
 // package.
 type backendSpec struct {
-	name             string
-	socketPath       string
-	systemPrompt     string
+	name         string
+	socketPath   string
+	systemPrompt string
+	// docs is the book the model searches; nil for none.
+	docs             *docs.Library
 	newMCPClient     func(string) (*mcpclient.Client, error)
 	newAuthenticator func(*mcpclient.Client) api.Authenticator
+}
+
+// loadDocs reads the book of the documentation at root, nil when none is
+// configured or it cannot be read: the backend then offers no documentation
+// search, and serves the rest. A root naming its llms.txt is its directory.
+func loadDocs(root string) *docs.Library {
+	if root == "" {
+		log.Printf("documentation: none configured, no documentation search")
+		return nil
+	}
+	index := strings.TrimSuffix(root, "llms.txt")
+	if !strings.HasSuffix(index, "/") {
+		index += "/"
+	}
+	index += "llms.txt"
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	library, _, err := docs.BookLoader(&http.Client{Timeout: 30 * time.Second})(ctx, index)
+	if err != nil {
+		log.Printf("documentation: read %s: %v; no documentation search", index, err)
+		return nil
+	}
+	log.Printf("documentation: %s, %d sections, %d parents", library.Source(), library.Len(), library.Parents())
+	return library
 }
 
 // newBackend builds the MCP client, the agent and the conversation service of

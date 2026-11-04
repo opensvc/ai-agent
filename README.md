@@ -72,6 +72,16 @@ resources of one OpenSVC service, and give the `opensvc-ai` user access to
 its socket through its group. A socket need not exist when the agent starts.
 Restrict network access to the agent port.
 
+With `OPENSVC_AI_DOCS_URL`, the root of the OpenSVC book, the `om3` backend
+offers the model `search_docs`, a search of the book: at startup the agent
+reads its `llms.txt` and the pages under `agent/` and the keyword history it
+lists, from that host only, in 60 s at most, and holds their index in
+memory, about 2 MiB. A book that cannot be read leaves the backend without
+the search, said in the log, the rest served. The book is read once: a book
+deployed again is read at the next start of the agent. A mirror of the book
+serves its own `llms.txt`; see the
+[client contract](docs/api.md#documentation).
+
 For browser clients, set `OPENSVC_AI_CORS_ALLOWED_ORIGINS` to comma-separated
 webapp origins, or `*` to allow all origins. Empty by default. See the
 [browser client guide](docs/webapp.md#cors) for examples and restrictions.
@@ -88,6 +98,7 @@ webapp origins, or `*` to allow all origins. Empty by default. See the
 | `OPENSVC_AI_CONVERSATION_MAX_PER_USER` | `128`, or the instance limit if lower | 1 to the instance limit |
 | `OPENSVC_AI_CONVERSATION_MAX_DATABASE_MIB` | `256` | `32` to `1048576` |
 | `OPENSVC_AI_OC3_MCP_SOCKET` | unset: `oc3` not served | absolute path |
+| `OPENSVC_AI_DOCS_URL` | unset: no documentation search | `https` URL of the root of the book, such as `https://book.opensvc.com/`; one naming its `llms.txt` is its directory |
 | `OPENSVC_AI_CORS_ALLOWED_ORIGINS` | empty: no CORS | exact origins or `*` |
 | `OPENSVC_AI_MAX_CONCURRENT_ASKS` | `4` | 1 to 128 |
 | `OPENSVC_AI_SHUTDOWN_TIMEOUT` | `30s` | `1s` to `5m` |

@@ -13,6 +13,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/opensvc/ai-agent/internal/auth"
+	"github.com/opensvc/ai-agent/internal/docs"
 	"github.com/opensvc/ai-agent/internal/llm"
 )
 
@@ -48,6 +49,9 @@ type Config struct {
 	// which a result is not shown. 0 means DefaultSearchScoreRatio, a
 	// negative value shows every result.
 	SearchScoreRatio float64
+	// Docs is the book the model searches with search_docs; nil offers no
+	// such tool.
+	Docs *docs.Library
 	// Now is the clock the events of a turn are stamped with, At; nil means
 	// time.Now. The stream, the audit and the history carry its times.
 	Now func() time.Time
@@ -228,6 +232,11 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 	if err != nil {
 		return result, err
 	}
+	// The documentation is searched with search_docs, offered in every
+	// request of the turn when the backend has some.
+	if _, taken := selection.catalog[SearchDocsToolName]; taken && a.config.Docs != nil {
+		return result, fmt.Errorf("MCP tool %q conflicts with the documentation search of the agent", SearchDocsToolName)
+	}
 	// The tools of the client are offered in every request of the turn,
 	// never searched; one named as a tool of the agent is refused.
 	offered, offeredNames, err := clientTools(clientToolsFrom(ctx), selection.known)
@@ -308,6 +317,17 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 					return false, err
 				}
 				state.Results = append(state.Results, readResult)
+				continue
+			}
+			if a.config.Docs != nil && call.Name == SearchDocsToolName {
+				if err := emitAgentEvent(emit, Event{Type: EventToolStarted, ToolName: call.Name, ToolCallID: call.ID, ToolArguments: call.Arguments, Iteration: state.Iteration}); err != nil {
+					return false, err
+				}
+				docsResult := searchDocs(a.config.Docs, call)
+				if err := emitAgentEvent(emit, Event{Type: EventToolFinished, ToolName: call.Name, ToolError: docsResult.IsError, ToolCallID: call.ID, ToolResult: docsResult.Content, Iteration: state.Iteration}); err != nil {
+					return false, err
+				}
+				state.Results = append(state.Results, docsResult)
 				continue
 			}
 			if selection.search && call.Name == SearchToolName {
@@ -443,6 +463,12 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 			requestTools = append(requestTools, *shelf.tool)
 			if !slices.Contains(selection.shown, ReadResourceToolName) {
 				selection.shown = append(selection.shown, ReadResourceToolName)
+			}
+		}
+		if a.config.Docs != nil {
+			requestTools = append(requestTools, docsTool())
+			if !slices.Contains(selection.shown, SearchDocsToolName) {
+				selection.shown = append(selection.shown, SearchDocsToolName)
 			}
 		}
 		requestTools = append(requestTools, offered...)

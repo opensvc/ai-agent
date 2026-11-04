@@ -349,7 +349,7 @@ not on the clusters or the collector.
   digits, underscores or hyphens, the names the model providers take, a
   description of at most 4 KiB and parameters, a JSON schema object, of at
   most 64 KiB, 256 KiB in all, or 400 `invalid_tools`. A name of a tool of
-  the agent, `search_tools`, `read_resource` or `load_skill`, is refused there; a name of
+  the agent, `search_tools`, `read_resource`, `load_skill` or `search_docs`, is refused there; a name of
   a tool of the MCP ends the run with `RUN_ERROR` `tool_name_conflict`, the
   turn reading the catalog of the MCP: a tool of the client must not take
   the place of one, such as a destructive tool the agent confirms. They are
@@ -442,6 +442,29 @@ and a call of it, such as one waiting behind a confirmed call when the
 turn resumes, is answered with a tool error. The listing is one more MCP
 request per turn, resumptions included: the session is opened per turn,
 and nothing caches it.
+
+## Documentation
+
+When the agent has a book, with `OPENSVC_AI_DOCS_URL`, the `om3` backend
+offers the model a tool of the agent's own, `search_docs`, in every request
+of the turn, and its system prompt says when to use it: for how OpenSVC
+works, how to configure or do something, or what is advised. The book is
+read from its `llms.txt` at startup, once: the pages under `agent/`, and the
+history of the keywords, `changes.md` and `removed.md` of the keyword
+reference, listed in its optional section; the rest of the reference is left
+out, the daemon serving it to the tools at the version it runs. The pages
+are indexed in memory by section. A search takes English keywords and an
+optional `limit`, 1 to 5, 3 by default; it gives, the best first, the text
+holding each matching section, once each, 16 KiB in all, those far under the
+best score left out: the page when it is short, else the run of its
+sections, up to 6 KiB, the section is in, cut between sections of level 2
+where it can be, each opening on the headings it is under. The result names
+the book, its build and the agent release of its keyword reference, and ends
+on how to read it: the sections describe OpenSVC, not the cluster, and a
+value of an example is no default. A refused search is a tool error for the
+model, not a failed turn. The name is the agent's: an MCP tool named
+`search_docs` fails the turn. Without a book, the tool and its prompt are
+left out.
 
 ## Skills
 
