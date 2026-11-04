@@ -42,3 +42,13 @@ func TestDocsPromptStandsApart(t *testing.T) {
 		}
 	}
 }
+
+// TestDocsUnaskedNamesTheVersionOfTheNodes tells the model which version to
+// search again with, and how to read it.
+func TestDocsUnaskedNamesTheVersionOfTheNodes(t *testing.T) {
+	for _, word := range []string{"search again", "agent_version", "get_node", "list_nodes"} {
+		if !strings.Contains(DocsUnasked, word) {
+			t.Errorf("DocsUnasked lacks %q", word)
+		}
+	}
+}

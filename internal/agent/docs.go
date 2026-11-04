@@ -55,6 +55,10 @@ type Books struct {
 	// Unknown says that Default gave no version, such as "The version the
 	// nodes of this cluster run could not be read".
 	Unknown string
+	// Unasked follows the note of a search that names no version, with no
+	// Default to give one, such as one telling the model how to name the
+	// version of the nodes the question is about.
+	Unasked string
 }
 
 // Versions gives the release lines of the shelf.
@@ -88,6 +92,9 @@ func (b Books) Docs(ctx context.Context, session MCPSession, version string) (*d
 		}
 	}
 	library, choice := b.Shelf.Book(ctx, version)
+	if version == "" && b.Default == nil && b.Unasked != "" && library != nil && len(b.Shelf.Lines()) > 0 {
+		choice = strings.TrimSpace(choice + " " + b.Unasked)
+	}
 	return library, choice, nil
 }
 

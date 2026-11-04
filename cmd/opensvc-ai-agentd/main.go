@@ -78,7 +78,7 @@ func main() {
 		om3Docs = agent.Books{Shelf: shelf, Default: om3.NewClusterVersions().Version, DefaultIs: om3.DocsDefault, Unknown: om3.DocsUnknown}
 		om3Prompt += "\n" + om3.DocsPrompt
 		// A fleet runs several: the latest book when the model names none.
-		oc3Docs = agent.Books{Shelf: shelf}
+		oc3Docs = agent.Books{Shelf: shelf, Unasked: oc3.DocsUnasked}
 		oc3Prompt += "\n" + oc3.DocsPrompt
 	}
 	// om3 is always served; oc3 only when its MCP socket is configured.
