@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -150,10 +151,10 @@ func TestSearchDocsWithNoBookSaysTheDocumentationCannotBeRead(t *testing.T) {
 	}
 }
 
-// TestSearchDocsReadsTheVersionOfTheCluster runs a turn whose model searches
-// the documentation with no version: the backend reads the version of the
-// cluster through the MCP, and the search gives the book of its line.
-func TestSearchDocsReadsTheVersionOfTheCluster(t *testing.T) {
+// TestSearchDocsAuditsTheCallsOfTheAgent runs a turn whose model searches the
+// documentation with no version: the backend reads the version of the
+// cluster through the MCP, a call the audit is told and the client not.
+func TestSearchDocsAuditsTheCallsOfTheAgent(t *testing.T) {
 	session := &fakeSession{tools: []*mcp.Tool{{Name: "get_cluster_status", InputSchema: objectSchema()}}}
 	shelf := &shelfOf{library: quorumBook(t)}
 	books := Books{Shelf: shelf, Default: func(ctx context.Context, session MCPSession) (string, error) {
@@ -181,11 +182,27 @@ func TestSearchDocsReadsTheVersionOfTheCluster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := agent.RunTurn(t.Context(), nil, "how many arbitrators", func(Event) error { return nil }); err != nil {
+	var types []EventType
+	var called *AgentCall
+	if _, err := agent.RunTurn(t.Context(), nil, "how many arbitrators", func(event Event) error {
+		types = append(types, event.Type)
+		if event.Type == EventAgentToolCalled {
+			called = event.AgentCall
+		}
+		return nil
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if len(session.calls) != 1 || session.calls[0].name != "get_cluster_status" || len(shelf.asked) != 1 || shelf.asked[0] != "v3.0.0-rc56" {
 		t.Fatalf("MCP calls %#v, versions asked %q", session.calls, shelf.asked)
+	}
+	if called == nil || called.Tool != "get_cluster_status" || called.Purpose != "documentation_version" || called.Error {
+		t.Fatalf("agent call = %+v", called)
+	}
+	// The event comes between the start and the end of the search.
+	order := fmt.Sprint(types)
+	if !strings.Contains(order, "tool_started agent_tool_called tool_finished") {
+		t.Errorf("events = %s", order)
 	}
 }
 
@@ -213,9 +230,13 @@ func TestSearchDocsEndsTheTurnOnAFailedTransport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	var called *AgentCall
 	finished := false
 	_, err = agent.RunTurn(t.Context(), nil, "how many arbitrators", func(event Event) error {
-		if event.Type == EventToolFinished {
+		switch event.Type {
+		case EventAgentToolCalled:
+			called = event.AgentCall
+		case EventToolFinished:
 			finished = true
 		}
 		return nil
@@ -223,8 +244,8 @@ func TestSearchDocsEndsTheTurnOnAFailedTransport(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "connection reset by peer") {
 		t.Fatalf("RunTurn() error = %v, want the transport error", err)
 	}
-	if finished || len(shelf.asked) != 0 {
-		t.Errorf("search finished %v, books asked %q", finished, shelf.asked)
+	if called == nil || !called.Error || finished || len(shelf.asked) != 0 {
+		t.Errorf("agent call %+v, search finished %v, books asked %q", called, finished, shelf.asked)
 	}
 }
 
@@ -262,16 +283,20 @@ func TestSearchDocsReadsNoVersionOfAToolNotListed(t *testing.T) {
 		t.Fatal(err)
 	}
 	var result string
+	audited := false
 	if _, err := agent.RunTurn(t.Context(), nil, "how many arbitrators", func(event Event) error {
-		if event.Type == EventToolFinished {
+		switch event.Type {
+		case EventAgentToolCalled:
+			audited = true
+		case EventToolFinished:
 			result = string(event.ToolResult)
 		}
 		return nil
 	}); err != nil {
 		t.Fatalf("RunTurn() error = %v", err)
 	}
-	if len(session.calls) != 0 || len(shelf.asked) != 1 || shelf.asked[0] != "" {
-		t.Fatalf("MCP calls %#v, versions asked %q", session.calls, shelf.asked)
+	if len(session.calls) != 0 || audited || len(shelf.asked) != 1 || shelf.asked[0] != "" {
+		t.Fatalf("MCP calls %#v, audited %v, versions asked %q", session.calls, audited, shelf.asked)
 	}
 	if !strings.Contains(result, "The version of this cluster could not be read") || !strings.Contains(result, "Configure the number of nodes") {
 		t.Errorf("search result = %s", result)

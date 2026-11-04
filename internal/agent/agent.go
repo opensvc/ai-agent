@@ -323,10 +323,9 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 					return false, err
 				}
 				// The calls the source makes to give the book, such as the
-				// read of the version of the cluster, call only the tools
-				// the MCP lists.
-				own := &listedSession{MCPSession: session, listed: selection.catalog}
-				docsResult, err := searchDocs(ctx, a.config.Docs, own, call)
+				// read of the version of the cluster, are audited.
+				audited := &auditedSession{MCPSession: session, emit: emit, iteration: state.Iteration, purpose: "documentation_version", listed: selection.catalog}
+				docsResult, err := searchDocs(ctx, a.config.Docs, audited, call)
 				if err != nil {
 					return false, fmt.Errorf("search the documentation: %w", err)
 				}

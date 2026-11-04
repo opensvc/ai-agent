@@ -68,15 +68,18 @@ func main() {
 	if err != nil {
 		log.Fatalf("create LLM client: %v", err)
 	}
-	// With no book, the source stays nil, not a source holding nil: the
-	// backend offers no search.
-	var om3Docs agent.DocsSource
-	om3Prompt := om3.SystemPrompt
+	// One shelf of books serves both backends. With no book, a source stays
+	// nil, not a source holding nil: the backends offer no search.
+	var om3Docs, oc3Docs agent.DocsSource
+	om3Prompt, oc3Prompt := om3.SystemPrompt, oc3.SystemPrompt
 	if shelf := loadDocs(docsConfig.URL); shelf != nil {
 		// A conversation of om3 is about one cluster: a search is about the
 		// release line its nodes run when the model names none.
 		om3Docs = agent.Books{Shelf: shelf, Default: om3.NewClusterVersions().Version, DefaultIs: om3.DocsDefault, Unknown: om3.DocsUnknown}
 		om3Prompt += "\n" + om3.DocsPrompt
+		// A fleet runs several: the latest book when the model names none.
+		oc3Docs = agent.Books{Shelf: shelf}
+		oc3Prompt += "\n" + oc3.DocsPrompt
 	}
 	// om3 is always served; oc3 only when its MCP socket is configured.
 	specs := []backendSpec{{
@@ -85,7 +88,7 @@ func main() {
 	}}
 	if mcpConfig.OC3SocketPath != "" {
 		specs = append(specs, backendSpec{
-			name: "oc3", socketPath: mcpConfig.OC3SocketPath, systemPrompt: oc3.SystemPrompt, newMCPClient: oc3.NewMCPClient,
+			name: "oc3", socketPath: mcpConfig.OC3SocketPath, systemPrompt: oc3Prompt, docs: oc3Docs, newMCPClient: oc3.NewMCPClient,
 			newAuthenticator: func(client *mcpclient.Client) api.Authenticator { return oc3.NewAuthenticator(client) },
 		})
 	}

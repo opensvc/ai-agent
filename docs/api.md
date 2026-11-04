@@ -127,6 +127,12 @@ Only one turn runs at a time in a conversation.
   client is shown none of the refused calls; the audit records the answer as
   `tool_calls_refused`, with the `bound` it passed, `answer` or `question`,
   `calls_asked` and `calls_ran`.
+- **Calls of the agent.** An MCP call the agent makes of its own, not the
+  model, such as reading the version of the cluster a documentation search
+  is about, is not shown to the client nor counted in `tool_calls`; the
+  audit records it as `agent_tool_called`, with its `tool_name`, its
+  `purpose`, such as `documentation_version`, `tool_error` and
+  `duration_ms`.
 - **Last iteration.** The last model request of a turn, the
   `OPENSVC_AI_AGENT_MAX_ITERATIONS`th, declares the tools but takes no call of
   them (`tool_choice` none): the model answers with what the turn read,
@@ -445,21 +451,21 @@ and nothing caches it.
 
 ## Documentation
 
-When the agent has a book, with `OPENSVC_AI_DOCS_URL`, the `om3` backend
-offers the model a tool of the agent's own, `search_docs`, in every request
-of the turn, and its system prompt says when to use it: for how OpenSVC
-works, how to configure or do something, or what is advised. The book is
-read from its `llms.txt`: the pages under `agent/`, and the history of the
-keywords, `changes.md` and `removed.md` of the keyword reference, listed in
-its optional section; the rest of the reference is left out, the daemon
-serving it to the tools at the version it runs. The pages are indexed in
-memory by section. A search takes English keywords, an optional `limit`, 1
-to 5, 3 by default, and an optional `version`, the release line it is about;
-it gives, the best first, the text holding each matching section, once each,
-16 KiB in all, those far under the best score left out: the page when it is
-short, else the run of its sections, up to 6 KiB, the section is in, cut
-between sections of level 2 where it can be, each opening on the headings it
-is under. The result names the book, its build and the agent release of its
+When the agent has a book, with `OPENSVC_AI_DOCS_URL`, both backends offer
+the model a tool of the agent's own, `search_docs`, in every request of the
+turn, and its system prompt says when to use it: for how OpenSVC works, how
+to configure or do something, or what is advised. The book is read from its
+`llms.txt`: the pages under `agent/`, and the history of the keywords,
+`changes.md` and `removed.md` of the keyword reference, listed in its
+optional section; the rest of the reference is left out, the daemon serving
+it to the tools at the version it runs. The pages are indexed in memory by
+section. A search takes English keywords, an optional `limit`, 1 to 5, 3 by
+default, and an optional `version`, the release line it is about; it gives,
+the best first, the text holding each matching section, once each, 16 KiB in
+all, those far under the best score left out: the page when it is short,
+else the run of its sections, up to 6 KiB, the section is in, cut between
+sections of level 2 where it can be, each opening on the headings it is
+under. The result names the book, its build and the agent release of its
 keyword reference, which release line it is the book of and why, and ends on
 how to read it: the sections describe OpenSVC, not the cluster, and a value
 of an example is no default. A refused search is a tool error for the model,
@@ -499,9 +505,12 @@ read, such as on a tool error, taking the latest book, the result saying so;
 else the latest book. An MCP that does not list `get_cluster_status` gives
 no version, the agent not calling it, and the latest book; a failed MCP
 transport during the read ends the turn, as a failed call of the model does.
-The version is not read while the agent has no book. A version of a line
-newer than the latest book, of a line with no book, or naming no line, gets
-the latest book, the result saying so.
+The version is not read while the agent has no book. The `oc3` backend has
+no default, a fleet running several lines: its prompt asks the model to name
+the line of the `agent_version` the collector reports for the nodes
+concerned, and a search naming none gives the latest book. A version of a
+line newer than the latest book, of a line with no book, or naming no line,
+gets the latest book, the result saying so.
 
 ## Skills
 

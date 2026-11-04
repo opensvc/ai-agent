@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -90,10 +91,15 @@ func (b Books) Docs(ctx context.Context, session MCPSession, version string) (*d
 	return library, choice, nil
 }
 
-// listedSession is the session of a turn for the MCP calls the agent makes
-// of its own, such as reading the version of the cluster a search is about.
-type listedSession struct {
+// auditedSession is the session of a turn for the MCP calls the agent
+// makes of its own, such as reading the version of the cluster a search is
+// about: each is told the audit, never the client, as an
+// agent_tool_called event.
+type auditedSession struct {
 	MCPSession
+	emit      EmitFunc
+	iteration int
+	purpose   string
 	// listed are the tools the MCP lists this turn: another is not called.
 	listed map[string]llm.Tool
 }
@@ -104,11 +110,17 @@ type listedSession struct {
 // ending the turn on the error the MCP would give.
 var ErrToolNotListed = errors.New("the MCP lists no such tool")
 
-func (s *listedSession) CallTool(ctx context.Context, name string, arguments map[string]any) (*mcp.CallToolResult, error) {
+func (s *auditedSession) CallTool(ctx context.Context, name string, arguments map[string]any) (*mcp.CallToolResult, error) {
 	if _, ok := s.listed[name]; !ok {
 		return nil, fmt.Errorf("%w: %s", ErrToolNotListed, name)
 	}
-	return s.MCPSession.CallTool(ctx, name, arguments)
+	started := time.Now()
+	result, err := s.MCPSession.CallTool(ctx, name, arguments)
+	call := &AgentCall{Tool: name, Purpose: s.purpose, Error: err != nil || result == nil || result.IsError, Duration: time.Since(started)}
+	if emitErr := emitAgentEvent(s.emit, Event{Type: EventAgentToolCalled, AgentCall: call, Iteration: s.iteration}); emitErr != nil {
+		return nil, emitErr
+	}
+	return result, err
 }
 
 // maxVersionBytes bounds the version a model names.

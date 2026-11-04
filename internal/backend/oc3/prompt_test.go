@@ -28,3 +28,17 @@ func TestSystemPromptGroundsToolArguments(t *testing.T) {
 		}
 	}
 }
+
+// TestDocsPromptStandsApart keeps every word of search_docs out of the prompt
+// of a backend with no book to search, where the tool is not offered, and
+// names the tools the version of a node is read with.
+func TestDocsPromptStandsApart(t *testing.T) {
+	if strings.Contains(SystemPrompt, "search_docs") {
+		t.Error("SystemPrompt names search_docs, offered only with a book")
+	}
+	for _, rule := range []string{"search_docs", "agent_version", "get_node", "list_nodes", "leave version out", "say so first in the answer"} {
+		if !strings.Contains(DocsPrompt, rule) {
+			t.Errorf("DocsPrompt lacks %q", rule)
+		}
+	}
+}

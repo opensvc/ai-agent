@@ -26,6 +26,10 @@ const (
 	// EventToolCallsRefused reports a model answer past a bound of the tool
 	// calls, none of which ran: for the audit, not for the client.
 	EventToolCallsRefused EventType = "tool_calls_refused"
+	// EventAgentToolCalled reports a call of an MCP tool the agent made of
+	// its own, not the model, such as the read of the version of the cluster
+	// a documentation search is about: for the audit, not for the client.
+	EventAgentToolCalled EventType = "agent_tool_called"
 )
 
 type Event struct {
@@ -51,6 +55,8 @@ type Event struct {
 	PendingCalls []string
 	// Refused describes the answer of a tool_calls_refused event.
 	Refused *RefusedCalls
+	// AgentCall describes the call of an agent_tool_called event.
+	AgentCall *AgentCall
 	// ModelDuration and ModelFirstEvent time the model call of a usage
 	// event, on the clock of the agent: from the request to the usage, and
 	// to the first event of its stream.
@@ -68,6 +74,15 @@ type RefusedCalls struct {
 	// Asked is the number of calls of the answer, Ran the number the
 	// question had run before it.
 	Asked, Ran int
+}
+
+// AgentCall is a call of an MCP tool the agent made of its own: the tool,
+// what for, whether it failed, and how long it took.
+type AgentCall struct {
+	Tool     string
+	Purpose  string
+	Error    bool
+	Duration time.Duration
 }
 
 type EmitFunc func(Event) error
@@ -112,6 +127,12 @@ func (e Event) Validate() error {
 		if r == nil || (r.Bound != "answer" && r.Bound != "question") || r.Asked <= 0 || r.Ran < 0 ||
 			e.TextDelta != "" || e.ToolName != "" || e.Usage != nil || e.FinishReason != "" || e.ToolError {
 			return fmt.Errorf("invalid tool calls refused event")
+		}
+	case EventAgentToolCalled:
+		c := e.AgentCall
+		if c == nil || c.Tool == "" || c.Purpose == "" || c.Duration < 0 ||
+			e.TextDelta != "" || e.ToolName != "" || e.Usage != nil || e.FinishReason != "" || e.ToolError {
+			return fmt.Errorf("invalid agent tool called event")
 		}
 	default:
 		return fmt.Errorf("unsupported agent event type %q", e.Type)
