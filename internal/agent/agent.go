@@ -13,7 +13,6 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/opensvc/ai-agent/internal/auth"
-	"github.com/opensvc/ai-agent/internal/docs"
 	"github.com/opensvc/ai-agent/internal/llm"
 )
 
@@ -49,9 +48,9 @@ type Config struct {
 	// which a result is not shown. 0 means DefaultSearchScoreRatio, a
 	// negative value shows every result.
 	SearchScoreRatio float64
-	// Docs is the book the model searches with search_docs; nil offers no
-	// such tool.
-	Docs *docs.Library
+	// Docs gives the documentation the model searches with search_docs;
+	// nil offers no such tool.
+	Docs DocsSource
 	// Now is the clock the events of a turn are stamped with, At; nil means
 	// time.Now. The stream, the audit and the history carry its times.
 	Now func() time.Time
@@ -323,7 +322,14 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 				if err := emitAgentEvent(emit, Event{Type: EventToolStarted, ToolName: call.Name, ToolCallID: call.ID, ToolArguments: call.Arguments, Iteration: state.Iteration}); err != nil {
 					return false, err
 				}
-				docsResult := searchDocs(a.config.Docs, call)
+				// The calls the source makes to give the book, such as the
+				// read of the version of the cluster, call only the tools
+				// the MCP lists.
+				own := &listedSession{MCPSession: session, listed: selection.catalog}
+				docsResult, err := searchDocs(ctx, a.config.Docs, own, call)
+				if err != nil {
+					return false, fmt.Errorf("search the documentation: %w", err)
+				}
 				if err := emitAgentEvent(emit, Event{Type: EventToolFinished, ToolName: call.Name, ToolError: docsResult.IsError, ToolCallID: call.ID, ToolResult: docsResult.Content, Iteration: state.Iteration}); err != nil {
 					return false, err
 				}
@@ -466,7 +472,7 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 			}
 		}
 		if a.config.Docs != nil {
-			requestTools = append(requestTools, docsTool())
+			requestTools = append(requestTools, docsTool(a.config.Docs))
 			if !slices.Contains(selection.shown, SearchDocsToolName) {
 				selection.shown = append(selection.shown, SearchDocsToolName)
 			}

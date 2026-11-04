@@ -74,13 +74,17 @@ Restrict network access to the agent port.
 
 With `OPENSVC_AI_DOCS_URL`, the root of the OpenSVC book, the `om3` backend
 offers the model `search_docs`, a search of the book: at startup the agent
-reads its `llms.txt` and the pages under `agent/` and the keyword history it
-lists, from that host only, in 60 s at most, and holds their index in
-memory, about 2 MiB. A book that cannot be read leaves the backend without
-the search, said in the log, the rest served. The book is read once: a book
-deployed again is read at the next start of the agent. A mirror of the book
-serves its own `llms.txt`; see the
-[client contract](docs/api.md#documentation).
+reads its `versions.json`, the `llms.txt` of its latest release line and the
+pages under `agent/` and the keyword history it lists, from that host only,
+in 60 s at most, and holds their index in memory, about 2 MiB. A book that
+cannot be read at startup is read again on a search, every minute at most,
+said in the log; the search answers meanwhile that it cannot be read, the
+rest served. Every 15 minutes, on a search, the agent reads `versions.json`
+and the `llms.txt` of the latest book again, and the latest book when its
+build changed: a book deployed again is seen without a restart. The book of
+an earlier release line, under its own path, is read the first time a search
+asks for it. A mirror of the book serves its own `versions.json` and
+`llms.txt`; see the [client contract](docs/api.md#documentation).
 
 For browser clients, set `OPENSVC_AI_CORS_ALLOWED_ORIGINS` to comma-separated
 webapp origins, or `*` to allow all origins. Empty by default. See the

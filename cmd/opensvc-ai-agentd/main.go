@@ -68,10 +68,14 @@ func main() {
 	if err != nil {
 		log.Fatalf("create LLM client: %v", err)
 	}
-	var om3Docs *docs.Library
+	// With no book, the source stays nil, not a source holding nil: the
+	// backend offers no search.
+	var om3Docs agent.DocsSource
 	om3Prompt := om3.SystemPrompt
-	if library := loadDocs(docsConfig.URL); library != nil {
-		om3Docs = library
+	if shelf := loadDocs(docsConfig.URL); shelf != nil {
+		// A conversation of om3 is about one cluster: a search is about the
+		// release line its nodes run when the model names none.
+		om3Docs = agent.Books{Shelf: shelf, Default: om3.NewClusterVersions().Version, DefaultIs: om3.DocsDefault, Unknown: om3.DocsUnknown}
 		om3Prompt += "\n" + om3.DocsPrompt
 	}
 	// om3 is always served; oc3 only when its MCP socket is configured.
@@ -186,34 +190,36 @@ type backendSpec struct {
 	name         string
 	socketPath   string
 	systemPrompt string
-	// docs is the book the model searches; nil for none.
-	docs             *docs.Library
+	// docs gives the documentation the model searches; nil for none.
+	docs             agent.DocsSource
 	newMCPClient     func(string) (*mcpclient.Client, error)
 	newAuthenticator func(*mcpclient.Client) api.Authenticator
 }
 
-// loadDocs reads the book of the documentation at root, nil when none is
-// configured or it cannot be read: the backend then offers no documentation
-// search, and serves the rest. A root naming its llms.txt is its directory.
-func loadDocs(root string) *docs.Library {
+// loadDocs makes the shelf of the books of the documentation at root, nil
+// when none is configured: the backend then offers no documentation search.
+// A documentation that cannot be read at startup is read again on the
+// searches, which answer that it cannot be read meanwhile.
+func loadDocs(root string) *docs.Shelf {
 	if root == "" {
 		log.Printf("documentation: none configured, no documentation search")
 		return nil
 	}
-	index := strings.TrimSuffix(root, "llms.txt")
-	if !strings.HasSuffix(index, "/") {
-		index += "/"
-	}
-	index += "llms.txt"
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-	library, _, err := docs.BookLoader(&http.Client{Timeout: 30 * time.Second})(ctx, index)
+	client := &http.Client{Timeout: 30 * time.Second}
+	shelf, err := docs.NewShelf(root, client, docs.BookLoader(client), log.Printf)
 	if err != nil {
-		log.Printf("documentation: read %s: %v; no documentation search", index, err)
+		log.Printf("documentation: %v; no documentation search", err)
 		return nil
 	}
-	log.Printf("documentation: %s, %d sections, %d parents", library.Source(), library.Len(), library.Parents())
-	return library
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if err := shelf.Refresh(ctx); err != nil {
+		log.Printf("documentation: read %s: %v; read again on the next searches", shelf.Root(), err)
+		return shelf
+	}
+	latest := shelf.Latest()
+	log.Printf("documentation: %s, %d sections, %d parents; release lines %s", latest.Source(), latest.Len(), latest.Parents(), strings.Join(shelf.Lines(), ", "))
+	return shelf
 }
 
 // newBackend builds the MCP client, the agent and the conversation service of
