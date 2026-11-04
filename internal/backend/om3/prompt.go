@@ -21,3 +21,8 @@ An action asked on one node acts on that node: it does not become an action on t
 Do not infer what a tool does from its name: read its description before deciding it needs a preparation step.
 In tool provenance, observed_at is when the MCP collected a result, not when OpenSVC updated the underlying status; use daemon-provided updated_at when available to assess status age.
 Base conclusions on observed evidence, identify uncertainty, and keep the final answer concise.`
+
+// DocsPrompt completes SystemPrompt when the backend has a book to search
+// with search_docs: without one, the model is offered no such tool, and told
+// nothing of it.
+const DocsPrompt = `For a question on how OpenSVC works, how to configure or do something with it, or what is advised, search the documentation with search_docs before answering, and answer from the sections it returns: the documentation describes OpenSVC, the tools observe this cluster. The documentation leaves out the reference of the configuration keywords, but says what each release added, removed and changed in them: when its sections do not answer about a keyword, its default or its values, read it with list_node_config_keywords or list_object_config_keywords, which give it at the version the cluster runs, before answering.`

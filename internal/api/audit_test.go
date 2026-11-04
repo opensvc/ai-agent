@@ -36,6 +36,7 @@ func TestAuditRecordsTurnLifecycleWithoutSensitiveData(t *testing.T) {
 			{Type: agent.EventToolFinished, ToolName: "get_cluster_health", ToolError: true, Iteration: 1, At: time.UnixMilli(1_760_000_000_340)},
 			{Type: agent.EventUsage, Usage: &llm.Usage{InputTokens: 10, OutputTokens: 2, TotalTokens: 12}, Iteration: 1, ModelDuration: 1500 * time.Millisecond, ModelFirstEvent: 900 * time.Millisecond},
 			{Type: agent.EventToolCallsRefused, Refused: &agent.RefusedCalls{Bound: "answer", Asked: 12, Ran: 1}, Iteration: 2},
+			{Type: agent.EventAgentToolCalled, AgentCall: &agent.AgentCall{Tool: "get_cluster_status", Purpose: "documentation_version", Error: true, Duration: 80 * time.Millisecond}, Iteration: 2},
 			{Type: agent.EventCompleted, FinishReason: llm.FinishReasonCompleted, Iteration: 2},
 		} {
 			if err := emit(event); err != nil {
@@ -66,7 +67,7 @@ func TestAuditRecordsTurnLifecycleWithoutSensitiveData(t *testing.T) {
 	}
 
 	events := decodeAuditEvents(t, output.String())
-	wantEvents := []string{"conversation_run_started", "tool_started", "tool_finished", "llm_usage", "tool_calls_refused", "conversation_run_completed"}
+	wantEvents := []string{"conversation_run_started", "tool_started", "tool_finished", "llm_usage", "tool_calls_refused", "agent_tool_called", "conversation_run_completed"}
 	if len(events) != len(wantEvents) {
 		t.Fatalf("audit events = %#v", events)
 	}
@@ -91,7 +92,13 @@ func TestAuditRecordsTurnLifecycleWithoutSensitiveData(t *testing.T) {
 	if refused := events[4]; refused["bound"] != "answer" || refused["calls_asked"] != float64(12) || refused["calls_ran"] != float64(1) || refused["iteration"] != float64(2) {
 		t.Fatalf("refused calls audit = %#v", refused)
 	}
-	completed := events[5]
+	// A call the agent made of its own is audited apart, not counted as a
+	// call of the model.
+	if called := events[5]; called["tool_name"] != "get_cluster_status" || called["purpose"] != "documentation_version" || called["tool_error"] != true ||
+		called["code"] != "tool_error" || called["duration_ms"] != float64(80) || called["iteration"] != float64(2) {
+		t.Fatalf("agent tool call audit = %#v", called)
+	}
+	completed := events[6]
 	if completed["iterations"] != float64(2) || completed["tool_calls"] != float64(1) || completed["total_tokens"] != float64(12) {
 		t.Fatalf("completed audit = %#v", completed)
 	}

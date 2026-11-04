@@ -71,7 +71,7 @@ func clientTools(offered []ClientTool, taken func(string) bool) ([]llm.Tool, map
 	tools := make([]llm.Tool, 0, len(offered))
 	names := make(map[string]bool, len(offered))
 	for _, tool := range offered {
-		if taken(tool.Name) || tool.Name == SearchToolName || tool.Name == ReadResourceToolName || tool.Name == LoadSkillToolName || names[tool.Name] {
+		if taken(tool.Name) || tool.Name == SearchToolName || tool.Name == ReadResourceToolName || tool.Name == LoadSkillToolName || tool.Name == SearchDocsToolName || names[tool.Name] {
 			return nil, nil, errors.Join(ErrClientToolConflict, errors.New("tool "+tool.Name))
 		}
 		names[tool.Name] = true

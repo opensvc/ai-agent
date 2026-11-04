@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/opensvc/ai-agent/internal/config"
 	"github.com/opensvc/ai-agent/internal/conversation"
 	conversationsqlite "github.com/opensvc/ai-agent/internal/conversation/sqlite"
+	"github.com/opensvc/ai-agent/internal/docs"
 	"github.com/opensvc/ai-agent/internal/llm"
 	"github.com/opensvc/ai-agent/internal/llmfactory"
 	"github.com/opensvc/ai-agent/internal/mcpclient"
@@ -57,19 +59,36 @@ func main() {
 	if err != nil {
 		log.Fatalf("load MCP configuration: %v", err)
 	}
+	docsConfig, err := config.LoadDocs()
+	if err != nil {
+		log.Fatalf("load documentation configuration: %v", err)
+	}
 
 	model, err := llmfactory.New(llmConfig, nil)
 	if err != nil {
 		log.Fatalf("create LLM client: %v", err)
 	}
+	// One shelf of books serves both backends. With no book, a source stays
+	// nil, not a source holding nil: the backends offer no search.
+	var om3Docs, oc3Docs agent.DocsSource
+	om3Prompt, oc3Prompt := om3.SystemPrompt, oc3.SystemPrompt
+	if shelf := loadDocs(docsConfig.URL); shelf != nil {
+		// A conversation of om3 is about one cluster: a search is about the
+		// release line its nodes run when the model names none.
+		om3Docs = agent.Books{Shelf: shelf, Default: om3.NewClusterVersions().Version, DefaultIs: om3.DocsDefault, Unknown: om3.DocsUnknown}
+		om3Prompt += "\n" + om3.DocsPrompt
+		// A fleet runs several: the latest book when the model names none.
+		oc3Docs = agent.Books{Shelf: shelf}
+		oc3Prompt += "\n" + oc3.DocsPrompt
+	}
 	// om3 is always served; oc3 only when its MCP socket is configured.
 	specs := []backendSpec{{
-		name: "om3", socketPath: mcpConfig.OM3SocketPath, systemPrompt: om3.SystemPrompt, newMCPClient: om3.NewMCPClient,
+		name: "om3", socketPath: mcpConfig.OM3SocketPath, systemPrompt: om3Prompt, docs: om3Docs, newMCPClient: om3.NewMCPClient,
 		newAuthenticator: func(client *mcpclient.Client) api.Authenticator { return om3.NewAuthenticator(client) },
 	}}
 	if mcpConfig.OC3SocketPath != "" {
 		specs = append(specs, backendSpec{
-			name: "oc3", socketPath: mcpConfig.OC3SocketPath, systemPrompt: oc3.SystemPrompt, newMCPClient: oc3.NewMCPClient,
+			name: "oc3", socketPath: mcpConfig.OC3SocketPath, systemPrompt: oc3Prompt, docs: oc3Docs, newMCPClient: oc3.NewMCPClient,
 			newAuthenticator: func(client *mcpclient.Client) api.Authenticator { return oc3.NewAuthenticator(client) },
 		})
 	}
@@ -93,7 +112,7 @@ func main() {
 		}
 		backend, service, err := newBackend(spec, model, conversationStore, agent.Config{
 			Backend: spec.name, SystemPrompt: spec.systemPrompt, MaxIterations: agentConfig.MaxIterations, Timeout: agentConfig.Timeout,
-			SearchThreshold: agentConfig.SearchThreshold, SearchScoreRatio: agentConfig.SearchScoreRatio,
+			SearchThreshold: agentConfig.SearchThreshold, SearchScoreRatio: agentConfig.SearchScoreRatio, Docs: spec.docs,
 		}, serviceConfig)
 		if err != nil {
 			cancelStartup()
@@ -171,11 +190,39 @@ func main() {
 // backendSpec describes one backend: its MCP socket and the rules of its
 // package.
 type backendSpec struct {
-	name             string
-	socketPath       string
-	systemPrompt     string
+	name         string
+	socketPath   string
+	systemPrompt string
+	// docs gives the documentation the model searches; nil for none.
+	docs             agent.DocsSource
 	newMCPClient     func(string) (*mcpclient.Client, error)
 	newAuthenticator func(*mcpclient.Client) api.Authenticator
+}
+
+// loadDocs makes the shelf of the books of the documentation at root, nil
+// when none is configured: the backend then offers no documentation search.
+// A documentation that cannot be read at startup is read again on the
+// searches, which answer that it cannot be read meanwhile.
+func loadDocs(root string) *docs.Shelf {
+	if root == "" {
+		log.Printf("documentation: none configured, no documentation search")
+		return nil
+	}
+	client := &http.Client{Timeout: 30 * time.Second}
+	shelf, err := docs.NewShelf(root, client, docs.BookLoader(client), log.Printf)
+	if err != nil {
+		log.Printf("documentation: %v; no documentation search", err)
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if err := shelf.Refresh(ctx); err != nil {
+		log.Printf("documentation: read %s: %v; read again on the next searches", shelf.Root(), err)
+		return shelf
+	}
+	latest := shelf.Latest()
+	log.Printf("documentation: %s, %d sections, %d parents; release lines %s", latest.Source(), latest.Len(), latest.Parents(), strings.Join(shelf.Lines(), ", "))
+	return shelf
 }
 
 // newBackend builds the MCP client, the agent and the conversation service of

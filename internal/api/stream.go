@@ -187,6 +187,18 @@ func streamRun(response http.ResponseWriter, request *http.Request, audit auditL
 			audit.event(request.Context(), "tool_finished", attributes...)
 			activeToolName = ""
 			activeToolStartedAt = time.Time{}
+		case agent.EventAgentToolCalled:
+			attributes := []slog.Attr{
+				slog.String("tool_name", event.AgentCall.Tool),
+				slog.String("purpose", event.AgentCall.Purpose),
+				slog.Int("iteration", event.Iteration),
+				slog.Bool("tool_error", event.AgentCall.Error),
+				slog.Int64("duration_ms", event.AgentCall.Duration.Milliseconds()),
+			}
+			if event.AgentCall.Error {
+				attributes = append(attributes, slog.String("code", "tool_error"))
+			}
+			audit.event(request.Context(), "agent_tool_called", attributes...)
 		case agent.EventToolCallsRefused:
 			audit.event(request.Context(), "tool_calls_refused",
 				slog.Int("iteration", event.Iteration),

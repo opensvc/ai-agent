@@ -42,6 +42,8 @@ func TestEncoderOrdersATurn(t *testing.T) {
 		agent.Event{Type: agent.EventUsage, Usage: &llm.Usage{InputTokens: 3, OutputTokens: 2, TotalTokens: 5}, Iteration: 1},
 		// Refused calls never ran: the client sees none of them.
 		agent.Event{Type: agent.EventToolCallsRefused, Refused: &agent.RefusedCalls{Bound: "answer", Asked: 9}, Iteration: 2},
+		// A call the agent made of its own is for the audit only.
+		agent.Event{Type: agent.EventAgentToolCalled, AgentCall: &agent.AgentCall{Tool: "get_cluster_status", Purpose: "documentation_version"}, Iteration: 2},
 		agent.Event{Type: agent.EventTextDelta, TextDelta: "No node.", Iteration: 2},
 		agent.Event{Type: agent.EventCompleted, TurnID: "t-1", Iteration: 2},
 	)

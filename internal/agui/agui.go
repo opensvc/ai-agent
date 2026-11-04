@@ -338,6 +338,10 @@ func (e *Encoder) Encode(event agent.Event) ([]Event, error) {
 	case agent.EventToolCallsRefused:
 		// None of the calls ran: the client is shown none of them.
 		return nil, nil
+	case agent.EventAgentToolCalled:
+		// The agent made the call, not the model: it is audited, and the
+		// client shown the search it served.
+		return nil, nil
 	case agent.EventUsage:
 		if event.Usage != nil {
 			e.usage.InputTokens += event.Usage.InputTokens

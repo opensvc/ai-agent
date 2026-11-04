@@ -23,3 +23,9 @@ The user sees the nodes and services their collector account may see: a missing 
 Collector dates are in the collector local time without a zone. In tool provenance, observed_at is when the MCP collected a result, not when the collector received the underlying data; use the collector dates to assess data age.
 A status flagged undef may come from the collector itself, when it no longer receives fresh data; check list_collector_events before attributing it to the nodes.
 Base conclusions on observed evidence, identify uncertainty, and keep the final answer concise.`
+
+// DocsPrompt completes SystemPrompt when the agent has a book to search with
+// search_docs: without one, the model is offered no such tool, and told
+// nothing of it. A fleet has no one version: the search gives the book of
+// the release line the model names, else the latest.
+const DocsPrompt = `For a question on how OpenSVC works, how to configure or do something with it, or what is advised, search the documentation with search_docs before answering, and answer from the sections it returns: the documentation describes OpenSVC, the collector tools observe the fleet. When the question is about given nodes, or the services on them, pass as version the agent_version the collector reports for them, read with get_node or list_nodes before searching when it is not known yet; for nodes of different release lines, search the book of each: a search without their version reads the latest book, which may not be theirs. When a search result says its book is not the one of the release line asked, say so first in the answer. Otherwise leave version out: the search gives the latest book. The documentation leaves out the reference of the configuration keywords, but says what each release added, removed and changed in them.`

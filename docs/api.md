@@ -127,6 +127,12 @@ Only one turn runs at a time in a conversation.
   client is shown none of the refused calls; the audit records the answer as
   `tool_calls_refused`, with the `bound` it passed, `answer` or `question`,
   `calls_asked` and `calls_ran`.
+- **Calls of the agent.** An MCP call the agent makes of its own, not the
+  model, such as reading the version of the cluster a documentation search
+  is about, is not shown to the client nor counted in `tool_calls`; the
+  audit records it as `agent_tool_called`, with its `tool_name`, its
+  `purpose`, such as `documentation_version`, `tool_error` and
+  `duration_ms`.
 - **Last iteration.** The last model request of a turn, the
   `OPENSVC_AI_AGENT_MAX_ITERATIONS`th, declares the tools but takes no call of
   them (`tool_choice` none): the model answers with what the turn read,
@@ -349,7 +355,7 @@ not on the clusters or the collector.
   digits, underscores or hyphens, the names the model providers take, a
   description of at most 4 KiB and parameters, a JSON schema object, of at
   most 64 KiB, 256 KiB in all, or 400 `invalid_tools`. A name of a tool of
-  the agent, `search_tools`, `read_resource` or `load_skill`, is refused there; a name of
+  the agent, `search_tools`, `read_resource`, `load_skill` or `search_docs`, is refused there; a name of
   a tool of the MCP ends the run with `RUN_ERROR` `tool_name_conflict`, the
   turn reading the catalog of the MCP: a tool of the client must not take
   the place of one, such as a destructive tool the agent confirms. They are
@@ -442,6 +448,69 @@ and a call of it, such as one waiting behind a confirmed call when the
 turn resumes, is answered with a tool error. The listing is one more MCP
 request per turn, resumptions included: the session is opened per turn,
 and nothing caches it.
+
+## Documentation
+
+When the agent has a book, with `OPENSVC_AI_DOCS_URL`, both backends offer
+the model a tool of the agent's own, `search_docs`, in every request of the
+turn, and its system prompt says when to use it: for how OpenSVC works, how
+to configure or do something, or what is advised. The book is read from its
+`llms.txt`: the pages under `agent/`, and the history of the keywords,
+`changes.md` and `removed.md` of the keyword reference, listed in its
+optional section; the rest of the reference is left out, the daemon serving
+it to the tools at the version it runs. The pages are indexed in memory by
+section. A search takes English keywords, an optional `limit`, 1 to 5, 3 by
+default, and an optional `version`, the release line it is about; it gives,
+the best first, the text holding each matching section, once each, 16 KiB in
+all, those far under the best score left out: the page when it is short,
+else the run of its sections, up to 6 KiB, the section is in, cut between
+sections of level 2 where it can be, each opening on the headings it is
+under. The result names the book, its build and the agent release of its
+keyword reference, which release line it is the book of and why, and ends on
+how to read it: the sections describe OpenSVC, not the cluster, and a value
+of an example is no default. A refused search is a tool error for the model,
+not a failed turn. The name is the agent's: an MCP tool named `search_docs`
+fails the turn. Without a book, the tool and its prompt are left out.
+
+The book is published by release line, as its `versions.json` lists them
+for the release picker of the book, under the configured root:
+
+```json
+[{"name": "v3.1", "path": "/"}, {"name": "v3.0", "path": "/v3.0/"}]
+```
+
+A name carries a release line, such as `v3.1`, and a path is a directory
+under the root, `/` the latest book; an entry otherwise, or a second one at
+`/`, is left out, said in the log. Without a `versions.json`, or with none
+at `/`, the root holds one book, of the line its `Keyword reference` names.
+
+The book at `/` is the latest, read at startup; the book of an earlier line
+is under its path, such as `v3.0/llms.txt`, read the first time a search
+asks for it, and kept. One that cannot be read is asked again 10 minutes
+later, the search taking the latest book meanwhile. Every 15 minutes, on a
+search, the agent reads `versions.json` and the `llms.txt` of the latest
+book again: the latest book when its `Build` changed, the earlier ones from
+their new paths when asked after `versions.json` changed. A documentation
+that cannot be read at startup is read again on a search, every minute at
+most, the tool offered meanwhile and answering with a tool error that it
+cannot be read.
+
+The tool lists the release lines with a book, and the model names the one
+the question is about, as the tools reported the agent version of the nodes
+concerned. When it names none, the `om3` backend searches the book of the
+line the nodes of the cluster of the request run, the oldest when they
+differ, read through the MCP once in 5 minutes per cluster, every page of
+the nodes, a cluster of more than 1000 nodes or a version that cannot be
+read, such as on a tool error, taking the latest book, the result saying so;
+else the latest book. An MCP that does not list `get_cluster_status` gives
+no version, the agent not calling it, and the latest book; a failed MCP
+transport during the read ends the turn, as a failed call of the model does.
+The version is not read while the agent has no book. The `oc3` backend has
+no default, a fleet running several lines: its prompt asks the model to name
+the line of the `agent_version` the collector reports for the nodes
+concerned, and a search naming none gives the latest book. A version of a
+line newer than the latest book, of a line with no book, or naming no line,
+gets the latest book, the result saying so.
 
 ## Skills
 
