@@ -26,3 +26,8 @@ Base conclusions on observed evidence, identify uncertainty, and keep the final 
 // with search_docs: without one, the model is offered no such tool, and told
 // nothing of it.
 const DocsPrompt = `For a question on how OpenSVC works, how to configure or do something with it, or what is advised, search the documentation with search_docs before answering, and answer from the sections it returns: the documentation describes OpenSVC, the tools observe this cluster. The documentation leaves out the reference of the configuration keywords, but says what each release added, removed and changed in them: when its sections do not answer about a keyword, its default or its values, read it with list_node_config_keywords or list_object_config_keywords, which give it at the version the cluster runs, before answering.`
+
+// CodePrompt completes SystemPrompt when the backend has the code of the
+// daemon to search with search_code: without it, the model is offered no
+// such tool, and told nothing of it.
+const CodePrompt = `Before answering from memory how the daemon behaves, such as a timeout, a retry, an order or a decision of its own, or before saying the documentation does not say it, search the code of the daemon with search_code and answer from the declarations it returns. Leave its version out, for the latest code, unless the user names a version. The code tells what the daemon does, not what the user should do: for how to use or configure OpenSVC, answer from the documentation.`

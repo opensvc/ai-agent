@@ -355,7 +355,7 @@ not on the clusters or the collector.
   digits, underscores or hyphens, the names the model providers take, a
   description of at most 4 KiB and parameters, a JSON schema object, of at
   most 64 KiB, 256 KiB in all, or 400 `invalid_tools`. A name of a tool of
-  the agent, `search_tools`, `read_resource`, `load_skill` or `search_docs`, is refused there; a name of
+  the agent, `search_tools`, `read_resource`, `load_skill`, `search_docs` or `search_code`, is refused there; a name of
   a tool of the MCP ends the run with `RUN_ERROR` `tool_name_conflict`, the
   turn reading the catalog of the MCP: a tool of the client must not take
   the place of one, such as a destructive tool the agent confirms. They are
@@ -513,6 +513,37 @@ telling the model, when the question is about given nodes, to search again
 with their `agent_version`. A version of a line newer than the latest book,
 of a line with no book, or naming no line, gets the latest book, the result
 saying so.
+
+## Code
+
+When the agent has the code of the daemon, with `OPENSVC_AI_CODE_URL`, both
+backends offer the model a second tool of the agent's own, `search_code`,
+and their system prompt keeps it for why the daemon behaves as it does or
+how a part of it works inside, usage questions being answered from the
+documentation. A search reads the latest code of the daemon, the archive of
+`OPENSVC_AI_CODE_REF`, `main` by default, read again every 6 hours in the
+background, the searches served the code read before until the new read
+ends, the result saying a cluster may run another version; the model names
+a version only when the user names one, a tag such as `v3.0.0-rc56`, the
+`v` added when it is missing, or a commit, or `v3.0.0-rc56-41-g451250d44`,
+whose commit is read, else, when it is not published, its tag, the result
+saying the code is not exactly that version; a version with no published
+code is a tool error saying so.
+The archive is read from the configured host only, in memory, at most 32 MB,
+8000 entries and 2 MB a file, its Go files only, symbolic links left out; a
+file that does not parse, a generated file, marked `DO NOT EDIT`, and the
+tests are left out. Each declaration is indexed with its doc comment, the
+words of its identifiers searched, and a search gives, as `search_docs`
+does, the file of the declarations found when it is short, else the run of
+its declarations, up to 6 KiB, holding them, with its path and lines, 16 KiB
+in all. A search takes English keywords or Go identifiers, an optional
+`limit` and an optional `version`. The code of a version is read the first
+time a search asks for it, a failed read asked again 10 minutes later; the
+latest code and one named version are kept, the least recently used named
+version leaving, never one still read. A question searches the code 6 times
+at most, across the confirmations it waits on: a search past them is a tool
+error telling the model to answer with the code read.
+The name is the agent's: an MCP tool named `search_code` fails the turn.
 
 ## Skills
 

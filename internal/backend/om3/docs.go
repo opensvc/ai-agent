@@ -92,8 +92,8 @@ type nodePage struct {
 	} `json:"nodes"`
 }
 
-// reportedVersion is the oldest version the nodes of the cluster report, by
-// release line, every page of them read; empty when a page is a tool error
+// reportedVersion is the oldest version the nodes of the cluster report, the
+// commits past a tag counted, every page of them read; empty when a page is a tool error
 // or cannot be read, the nodes are more than versionPages pages, or none
 // reports a version; an error when the MCP transport fails.
 func reportedVersion(ctx context.Context, session agent.MCPSession) (string, error) {
@@ -124,7 +124,7 @@ func reportedVersion(ctx context.Context, session agent.MCPSession) (string, err
 			if node.Status == nil || docs.Line(node.Status.AgentVersion) == "" {
 				continue
 			}
-			if oldest == "" || docs.OlderLine(docs.Line(node.Status.AgentVersion), docs.Line(oldest)) {
+			if oldest == "" || docs.OlderVersion(node.Status.AgentVersion, oldest) {
 				oldest = node.Status.AgentVersion
 			}
 		}

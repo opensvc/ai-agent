@@ -136,8 +136,15 @@ func schemaParameters(schema any) []Parameter {
 
 // New indexes documents. Names must be unique and non-empty.
 func New(documents []Document) (*Index, error) {
-	if len(documents) > MaxDocuments {
-		return nil, fmt.Errorf("tool search index holds at most %d tools", MaxDocuments)
+	return NewBounded(documents, MaxDocuments)
+}
+
+// NewBounded indexes documents as New does, at most limit of them: an
+// index of the declarations of a source tree holds far more than a catalog
+// of tools.
+func NewBounded(documents []Document, limit int) (*Index, error) {
+	if len(documents) > limit {
+		return nil, fmt.Errorf("search index holds at most %d documents", limit)
 	}
 	index := &Index{documentsOf: map[string]int{}}
 	var total float64

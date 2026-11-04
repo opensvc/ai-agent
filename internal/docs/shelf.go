@@ -52,6 +52,47 @@ func Line(version string) string {
 	return match[1] + "." + match[2]
 }
 
+// fullVersion is a version as git describe gives it: v3.0.0, v3.0.0-rc56,
+// or v3.0.0-rc56-41-g451250d44, 41 commits past the tag rc56.
+var fullVersion = regexp.MustCompile(`^v?(\d{1,4})\.(\d{1,4})(?:\.(\d{1,6}))?(?:-([0-9A-Za-z.]+?))??(?:-(\d{1,9})-g[0-9a-f]{4,40})?$`)
+
+// prerelease is a pre-release, such as rc56: its name, then its number.
+var prerelease = regexp.MustCompile(`^([A-Za-z.]*)(\d*)$`)
+
+// OlderVersion tells whether version a is older than b: by release line,
+// then patch, then pre-release, a release coming after its pre-releases,
+// then the commits git describe counts past the tag. A version of an
+// unknown form is compared by its line only.
+func OlderVersion(a, b string) bool {
+	ma, mb := fullVersion.FindStringSubmatch(a), fullVersion.FindStringSubmatch(b)
+	if ma == nil || mb == nil {
+		return OlderLine(Line(a), Line(b))
+	}
+	number := func(s string) int {
+		n, _ := strconv.Atoi(s)
+		return n
+	}
+	for _, i := range []int{1, 2, 3} {
+		if x, y := number(ma[i]), number(mb[i]); x != y {
+			return x < y
+		}
+	}
+	if pa, pb := ma[4], mb[4]; pa != pb {
+		switch {
+		case pa == "":
+			return false
+		case pb == "":
+			return true
+		}
+		qa, qb := prerelease.FindStringSubmatch(pa), prerelease.FindStringSubmatch(pb)
+		if qa == nil || qb == nil || qa[1] != qb[1] {
+			return pa < pb
+		}
+		return number(qa[2]) < number(qb[2])
+	}
+	return number(ma[5]) < number(mb[5])
+}
+
 // OlderLine tells whether release line a is older than b.
 func OlderLine(a, b string) bool {
 	am, an := lineNumbers(a)

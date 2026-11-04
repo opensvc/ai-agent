@@ -52,3 +52,17 @@ func TestDocsUnaskedNamesTheVersionOfTheNodes(t *testing.T) {
 		}
 	}
 }
+
+// TestCodePromptSearchesTheLatestCode keeps search_code out of the prompt of
+// a backend with no code to search, and leaves the version out unless the
+// user names one.
+func TestCodePromptSearchesTheLatestCode(t *testing.T) {
+	if strings.Contains(SystemPrompt, "search_code") || strings.Contains(DocsPrompt, "search_code") {
+		t.Error("a prompt offered without the code names search_code")
+	}
+	for _, rule := range []string{"search_code", "Leave its version out, for the latest code, unless the user names a version", "not what the user should do"} {
+		if !strings.Contains(CodePrompt, rule) {
+			t.Errorf("CodePrompt lacks %q", rule)
+		}
+	}
+}

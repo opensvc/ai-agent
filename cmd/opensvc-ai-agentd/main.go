@@ -72,23 +72,38 @@ func main() {
 	// nil, not a source holding nil: the backends offer no search.
 	var om3Docs, oc3Docs agent.DocsSource
 	om3Prompt, oc3Prompt := om3.SystemPrompt, oc3.SystemPrompt
+	// The version of a cluster is read once for the book and the code.
+	clusterVersions := om3.NewClusterVersions()
 	if shelf := loadDocs(docsConfig.URL); shelf != nil {
 		// A conversation of om3 is about one cluster: a search is about the
 		// release line its nodes run when the model names none.
-		om3Docs = agent.Books{Shelf: shelf, Default: om3.NewClusterVersions().Version, DefaultIs: om3.DocsDefault, Unknown: om3.DocsUnknown}
+		om3Docs = agent.Books{Shelf: shelf, Default: clusterVersions.Version, DefaultIs: om3.DocsDefault, Unknown: om3.DocsUnknown}
 		om3Prompt += "\n" + om3.DocsPrompt
 		// A fleet runs several: the latest book when the model names none.
 		oc3Docs = agent.Books{Shelf: shelf, Unasked: oc3.DocsUnasked}
 		oc3Prompt += "\n" + oc3.DocsPrompt
 	}
+	// One shelf of code serves both backends: the latest code of the
+	// daemon, or the version the user names, read the first time a search
+	// asks for it.
+	var om3Code, oc3Code agent.CodeSource
+	if docsConfig.CodeURL != "" {
+		codeShelf := docs.NewCodeShelf(&http.Client{Timeout: 2 * time.Minute}, docsConfig.CodeURL, docsConfig.CodeRef, log.Printf)
+		om3Code, oc3Code = codeShelf, codeShelf
+		om3Prompt += "\n" + om3.CodePrompt
+		oc3Prompt += "\n" + oc3.CodePrompt
+		log.Printf("code: the daemon source at %s, the latest at %s", docsConfig.CodeURL, docsConfig.CodeRef)
+	} else {
+		log.Printf("code: none configured, no code search")
+	}
 	// om3 is always served; oc3 only when its MCP socket is configured.
 	specs := []backendSpec{{
-		name: "om3", socketPath: mcpConfig.OM3SocketPath, systemPrompt: om3Prompt, docs: om3Docs, newMCPClient: om3.NewMCPClient,
+		name: "om3", socketPath: mcpConfig.OM3SocketPath, systemPrompt: om3Prompt, docs: om3Docs, code: om3Code, newMCPClient: om3.NewMCPClient,
 		newAuthenticator: func(client *mcpclient.Client) api.Authenticator { return om3.NewAuthenticator(client) },
 	}}
 	if mcpConfig.OC3SocketPath != "" {
 		specs = append(specs, backendSpec{
-			name: "oc3", socketPath: mcpConfig.OC3SocketPath, systemPrompt: oc3Prompt, docs: oc3Docs, newMCPClient: oc3.NewMCPClient,
+			name: "oc3", socketPath: mcpConfig.OC3SocketPath, systemPrompt: oc3Prompt, docs: oc3Docs, code: oc3Code, newMCPClient: oc3.NewMCPClient,
 			newAuthenticator: func(client *mcpclient.Client) api.Authenticator { return oc3.NewAuthenticator(client) },
 		})
 	}
@@ -112,7 +127,7 @@ func main() {
 		}
 		backend, service, err := newBackend(spec, model, conversationStore, agent.Config{
 			Backend: spec.name, SystemPrompt: spec.systemPrompt, MaxIterations: agentConfig.MaxIterations, Timeout: agentConfig.Timeout,
-			SearchThreshold: agentConfig.SearchThreshold, SearchScoreRatio: agentConfig.SearchScoreRatio, Docs: spec.docs,
+			SearchThreshold: agentConfig.SearchThreshold, SearchScoreRatio: agentConfig.SearchScoreRatio, Docs: spec.docs, Code: spec.code,
 		}, serviceConfig)
 		if err != nil {
 			cancelStartup()
@@ -193,8 +208,10 @@ type backendSpec struct {
 	name         string
 	socketPath   string
 	systemPrompt string
-	// docs gives the documentation the model searches; nil for none.
+	// docs gives the documentation the model searches, code the source code
+	// of the daemon; nil for none.
 	docs             agent.DocsSource
+	code             agent.CodeSource
 	newMCPClient     func(string) (*mcpclient.Client, error)
 	newAuthenticator func(*mcpclient.Client) api.Authenticator
 }

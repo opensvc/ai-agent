@@ -165,10 +165,11 @@ func docsTool(source DocsSource) llm.Tool {
 }
 
 // searchDocs runs a search_docs call: the sections found in the book of
-// the version asked, each with its page and headings. A refused search is a
-// tool error for the model; an error of the source, such as a failed MCP
-// transport, fails the turn.
-func searchDocs(ctx context.Context, source DocsSource, session MCPSession, call llm.ToolCall) (llm.ToolResult, error) {
+// the version asked, each with its page and headings, then next, when not
+// empty, such as where to search what the sections do not say. A refused
+// search is a tool error for the model; an error of the source, such as a
+// failed MCP transport, fails the turn.
+func searchDocs(ctx context.Context, source DocsSource, session MCPSession, call llm.ToolCall, next string) (llm.ToolResult, error) {
 	fail := func(message string) (llm.ToolResult, error) {
 		return llm.ToolResult{CallID: call.ID, Content: textToolResult(message), IsError: true}, nil
 	}
@@ -195,7 +196,7 @@ func searchDocs(ctx context.Context, source DocsSource, session MCPSession, call
 		return fail(fmt.Sprintf("The documentation search was refused: %v. Search again with a few English keywords.", err))
 	}
 	if len(sections) == 0 {
-		return fail("No section of the documentation matches these keywords. Search again with other English keywords, or answer that the documentation does not say.")
+		return fail(strings.TrimSpace("No section of the documentation matches these keywords. Search again with other English keywords, or answer that the documentation does not say. " + next))
 	}
 	var text strings.Builder
 	fmt.Fprintf(&text, "Documentation: %s.", library.Source())
@@ -210,5 +211,8 @@ func searchDocs(ctx context.Context, source DocsSource, session MCPSession, call
 		fmt.Fprintf(&text, "Section: %s\nPage: %s\n\n%s", section.Title, section.Page, section.Text)
 	}
 	text.WriteString("\n\n---\n\n" + docsReading)
+	if next != "" {
+		text.WriteString(" " + next)
+	}
 	return llm.ToolResult{CallID: call.ID, Content: textToolResult(text.String())}, nil
 }

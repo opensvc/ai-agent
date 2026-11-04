@@ -407,3 +407,27 @@ func TestShelfSurvivesABookItCannotIndex(t *testing.T) {
 		t.Errorf("after a refresh that panicked: latest %s, logs %q", s.Latest().Source(), *logs)
 	}
 }
+
+func TestOlderVersionComparesTheWholeVersion(t *testing.T) {
+	for _, c := range []struct {
+		a, b  string
+		older bool
+	}{
+		{"v3.0.0-rc46-12-g1234567", "v3.0.0-rc47", true},
+		{"v3.0.0-rc56-41-g451250d44", "v3.0.0-rc56-3-gabcdef0", false},
+		{"v3.0.0-rc56-3-gabcdef0", "v3.0.0-rc56-41-g451250d44", true},
+		{"v3.0.0-rc56", "v3.0.0-rc56-1-gabcdef0", true},
+		{"v3.0.0-rc9", "v3.0.0-rc10", true},
+		{"v3.0.0-rc57", "v3.0.0", true},
+		{"v3.0.0", "v3.0.0-rc57", false},
+		{"v3.0.4", "v3.0.10", true},
+		{"v2.1.63", "v3.0.0-rc1", true},
+		{"v3.1.0", "v3.0.9", false},
+		{"v3.0.0-rc56", "v3.0.0-rc56", false},
+		{"2.1.63", "3.0.4", true},
+	} {
+		if got := OlderVersion(c.a, c.b); got != c.older {
+			t.Errorf("OlderVersion(%q, %q) = %v, want %v", c.a, c.b, got, c.older)
+		}
+	}
+}
