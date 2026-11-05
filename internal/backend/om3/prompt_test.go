@@ -56,7 +56,7 @@ func TestCodePromptStandsApart(t *testing.T) {
 	if strings.Contains(SystemPrompt, "search_code") || strings.Contains(DocsPrompt, "search_code") {
 		t.Error("a prompt offered without the code names search_code")
 	}
-	for _, rule := range []string{"search_code", "Before answering from memory", "Leave its version out, for the latest code, unless the user names a version", "not what the user should do", "answer from the documentation"} {
+	for _, rule := range []string{"search_code", "Before answering from memory", "Leave its version out, for the code of the version this cluster runs, unless the user names a version", "not what the user should do", "answer from the documentation"} {
 		if !strings.Contains(CodePrompt, rule) {
 			t.Errorf("CodePrompt lacks %q", rule)
 		}

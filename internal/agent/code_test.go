@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -56,7 +57,11 @@ func speakerIndex(t *testing.T) *docs.CodeIndex {
 func TestSearchCodeGivesTheDeclarationsWithTheirFileAndLines(t *testing.T) {
 	shelf := &codeShelfOf{index: speakerIndex(t)}
 	call := func(arguments string) llm.ToolResult {
-		return searchCode(context.Background(), shelf, llm.ToolCall{ID: "1", Name: SearchCodeToolName, Arguments: json.RawMessage(arguments)})
+		result, err := searchCode(context.Background(), Codes{Shelf: shelf}, nil, llm.ToolCall{ID: "1", Name: SearchCodeToolName, Arguments: json.RawMessage(arguments)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
 	}
 	// With no version, the latest code.
 	result := call(`{"query":"speaker first alive node"}`)
@@ -87,13 +92,13 @@ func TestCodeToolSearchesTheLatestCodeUnlessTheUserNamesAVersion(t *testing.T) {
 			Description string `json:"description"`
 		} `json:"properties"`
 	}
-	tool := codeTool(&codeShelfOf{})
+	tool := codeTool(Codes{Shelf: &codeShelfOf{}})
 	if err := json.Unmarshal(tool.InputSchema, &schema); err != nil {
 		t.Fatal(err)
 	}
 	version := schema.Properties["version"].Description
 	if !strings.HasPrefix(version, "leave it out to search the latest code of the daemon, at main; set it only when the user names a version") ||
-		strings.Contains(version, "451250d44") || !strings.Contains(tool.Description, "its latest code unless the user names a version") {
+		strings.Contains(version, "451250d44") || !strings.Contains(tool.Description, "by default the latest code of the daemon, at main, unless the user names a version") {
 		t.Errorf("version %q, tool %q", version, tool.Description)
 	}
 }
@@ -138,7 +143,7 @@ func TestSearchCodeRunsInATurn(t *testing.T) {
 		},
 	}}
 	agent, err := New(model, func(context.Context) (MCPSession, error) { return session, nil },
-		Config{SystemPrompt: testSystemPrompt, MaxIterations: 3, Timeout: time.Minute, Code: shelf})
+		Config{SystemPrompt: testSystemPrompt, MaxIterations: 3, Timeout: time.Minute, Code: Codes{Shelf: shelf}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +169,7 @@ func TestAnMCPToolNamedSearchCodeFailsTheTurn(t *testing.T) {
 	session := &fakeSession{tools: []*mcp.Tool{{Name: SearchCodeToolName, InputSchema: objectSchema()}}}
 	model := &scriptedLLM{t: t}
 	agent, err := New(model, func(context.Context) (MCPSession, error) { return session, nil },
-		Config{SystemPrompt: testSystemPrompt, MaxIterations: 3, Timeout: time.Minute, Code: &codeShelfOf{}})
+		Config{SystemPrompt: testSystemPrompt, MaxIterations: 3, Timeout: time.Minute, Code: Codes{Shelf: &codeShelfOf{}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +186,7 @@ func TestADocsSearchPointsToTheCodeOnlyWhenItCanBeSearched(t *testing.T) {
 	for _, withCode := range []bool{true, false} {
 		config := Config{SystemPrompt: testSystemPrompt, MaxIterations: 3, Timeout: time.Minute, Docs: &fixedDocs{library: quorumBook(t)}}
 		if withCode {
-			config.Code = &codeShelfOf{}
+			config.Code = Codes{Shelf: &codeShelfOf{}}
 		}
 		model := &scriptedLLM{t: t, steps: []llmStep{
 			func(_ llm.Request, emit llm.EmitFunc) error {
@@ -238,7 +243,7 @@ func TestCodeSearchesOfAQuestionAreBounded(t *testing.T) {
 		},
 	}}
 	agent, err := New(model, func(context.Context) (MCPSession, error) { return session, nil },
-		Config{SystemPrompt: testSystemPrompt, MaxIterations: 4, Timeout: time.Minute, Code: shelf})
+		Config{SystemPrompt: testSystemPrompt, MaxIterations: 4, Timeout: time.Minute, Code: Codes{Shelf: shelf}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,5 +258,85 @@ func TestCodeSearchesOfAQuestionAreBounded(t *testing.T) {
 	}
 	if len(shelf.asked) != maxCodeSearchesPerAsk || spent != 8-maxCodeSearchesPerAsk {
 		t.Errorf("searches run %d, refused %d; want %d and %d", len(shelf.asked), spent, maxCodeSearchesPerAsk, 8-maxCodeSearchesPerAsk)
+	}
+}
+
+// TestCodesSearchTheVersionOfTheClusterByDefault reads, for a search that
+// names no version, the version Default gives, such as the one the nodes of
+// the cluster of the conversation run, and says so; the latest code when
+// Default gives none or its code cannot be read; the version the user names
+// without asking Default.
+func TestCodesSearchTheVersionOfTheClusterByDefault(t *testing.T) {
+	var version string
+	var asked int
+	shelf := &codeShelfOf{index: speakerIndex(t)}
+	codes := Codes{Shelf: shelf, DefaultIs: "the code of the version the nodes of this cluster run", Unknown: "The version of this cluster could not be read",
+		Default: func(context.Context, MCPSession) (string, error) {
+			asked++
+			return version, nil
+		}}
+	if got := codes.ByDefault(); got != "the code of the version the nodes of this cluster run, else the latest code of the daemon, at main" {
+		t.Errorf("ByDefault() = %q", got)
+	}
+	for _, c := range []struct{ default_, named, asks, says string }{
+		{"v3.0.0-rc57", "", "v3.0.0-rc57", "This is the code of v3.0.0-rc57. It is the code of the version the nodes of this cluster run."},
+		{"", "", "", "The version of this cluster could not be read. This is the latest code of om3, at main."},
+		{"rc56", "", "", `The code of rc56, the version by default, could not be read. This is the latest code of om3, at main.`},
+		{"v3.0.0-rc57", "v3.0.0-rc56", "v3.0.0-rc56", "This is the code of v3.0.0-rc56."},
+	} {
+		version, asked, shelf.asked = c.default_, 0, nil
+		index, says, err := codes.Code(context.Background(), nil, c.named)
+		if err != nil || index == nil || says != c.says || shelf.asked[len(shelf.asked)-1] != c.asks || (c.named != "") != (asked == 0) {
+			t.Errorf("default %q, named %q: %v %q, asked %q, Default called %d", c.default_, c.named, index != nil, says, shelf.asked, asked)
+		}
+	}
+	// A failed read of the version ends the turn.
+	failing := Codes{Shelf: shelf, Default: func(context.Context, MCPSession) (string, error) { return "", errors.New("transport down") }}
+	if _, err := searchCode(context.Background(), failing, nil, llm.ToolCall{ID: "1", Name: SearchCodeToolName, Arguments: json.RawMessage(`{"query":"speaker"}`)}); err == nil {
+		t.Error("a failed read of the version did not fail the search")
+	}
+}
+
+// TestCodeVersionReadIsAudited runs a turn whose code search reads the
+// version of the cluster through the MCP: the read is an agent call of
+// purpose code_version.
+func TestCodeVersionReadIsAudited(t *testing.T) {
+	session := &fakeSession{tools: []*mcp.Tool{{Name: "get_cluster_status", InputSchema: objectSchema()}}}
+	codes := Codes{Shelf: &codeShelfOf{index: speakerIndex(t)}, DefaultIs: "the code of the version this cluster runs",
+		Default: func(ctx context.Context, session MCPSession) (string, error) {
+			_, err := session.CallTool(ctx, "get_cluster_status", map[string]any{"node_limit": 1})
+			return "v3.0.0-rc57", err
+		}}
+	model := &scriptedLLM{t: t, steps: []llmStep{
+		func(_ llm.Request, emit llm.EmitFunc) error {
+			return emitEvents(emit,
+				llm.Event{Type: llm.EventToolCall, ToolCall: &llm.ToolCall{ID: "call-1", Name: SearchCodeToolName, Arguments: json.RawMessage(`{"query":"speaker node"}`)}},
+				llm.Event{Type: llm.EventCompleted, FinishReason: llm.FinishReasonToolCalls},
+			)
+		},
+		func(_ llm.Request, emit llm.EmitFunc) error {
+			return emitEvents(emit, llm.Event{Type: llm.EventTextDelta, TextDelta: "done"}, llm.Event{Type: llm.EventCompleted, FinishReason: llm.FinishReasonCompleted})
+		},
+	}}
+	agent, err := New(model, func(context.Context) (MCPSession, error) { return session, nil },
+		Config{SystemPrompt: testSystemPrompt, MaxIterations: 3, Timeout: time.Minute, Code: codes})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var called *AgentCall
+	var result string
+	if _, err := agent.RunTurn(t.Context(), nil, "who is the speaker", func(event Event) error {
+		switch event.Type {
+		case EventAgentToolCalled:
+			called = event.AgentCall
+		case EventToolFinished:
+			result = string(event.ToolResult)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if called == nil || called.Purpose != "code_version" || called.Tool != "get_cluster_status" || !strings.Contains(result, "This is the code of v3.0.0-rc57. It is the code of the version this cluster runs.") {
+		t.Errorf("agent call %+v, result %s", called, result)
 	}
 }

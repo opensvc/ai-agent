@@ -98,8 +98,8 @@ func TestCodeShelfGivesTheCodeOfTheCommitElseOfItsTag(t *testing.T) {
 	}
 }
 
-func TestCodeShelfKeepsTwoVersionsAndRetriesAFailedRead(t *testing.T) {
-	f := &fakeCode{refs: map[string]bool{"v3.0.1": true, "v3.0.2": true, "v3.0.3": true}, reads: map[string]int{}}
+func TestCodeShelfKeepsThreeVersionsAndRetriesAFailedRead(t *testing.T) {
+	f := &fakeCode{refs: map[string]bool{"v3.0.1": true, "v3.0.2": true, "v3.0.3": true, "v3.0.4": true}, reads: map[string]int{}}
 	s, _ := codeShelf(f)
 	clock := time.Now()
 	s.now = func() time.Time { return clock }
@@ -107,6 +107,7 @@ func TestCodeShelfKeepsTwoVersionsAndRetriesAFailedRead(t *testing.T) {
 	s.Code(context.Background(), "v3.0.2")
 	s.Code(context.Background(), "v3.0.1")
 	s.Code(context.Background(), "v3.0.3")
+	s.Code(context.Background(), "v3.0.4")
 	// v3.0.2, the least recently used, left: it is read again, v3.0.1 not.
 	s.Code(context.Background(), "v3.0.1")
 	s.Code(context.Background(), "v3.0.2")

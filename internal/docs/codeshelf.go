@@ -11,9 +11,9 @@ import (
 
 const (
 	// maxCodeIndexes bounds the code indexes kept in memory, one per version
-	// of the code: a cluster runs one commit, and an index weighs tens of
-	// MB.
-	maxCodeIndexes = 2
+	// of the code: the latest code, and the versions the clusters of the
+	// conversations run, an index weighing tens of MB.
+	maxCodeIndexes = 3
 	// codeLoadTimeout bounds the reading and the indexing of the code of a
 	// version, the search waiting on it.
 	codeLoadTimeout = 2 * time.Minute
