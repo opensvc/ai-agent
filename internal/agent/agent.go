@@ -354,7 +354,13 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 				codeResult := llm.ToolResult{CallID: call.ID, Content: textToolResult(codeSearchesSpent), IsError: true}
 				if state.CodeSearches < maxCodeSearchesPerAsk {
 					state.CodeSearches++
-					codeResult = searchCode(ctx, a.config.Code, call)
+					// The read of the version of the cluster, the code
+					// searched by default, is audited.
+					audited := &auditedSession{MCPSession: session, emit: emit, iteration: state.Iteration, purpose: "code_version", listed: selection.catalog}
+					var err error
+					if codeResult, err = searchCode(ctx, a.config.Code, audited, call); err != nil {
+						return false, fmt.Errorf("search the code: %w", err)
+					}
 				}
 				if err := emitAgentEvent(emit, Event{Type: EventToolFinished, ToolName: call.Name, ToolError: codeResult.IsError, ToolCallID: call.ID, ToolResult: codeResult.Content, Iteration: state.Iteration}); err != nil {
 					return false, err

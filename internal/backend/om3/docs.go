@@ -20,14 +20,18 @@ const versionLifetime = 5 * time.Minute
 const (
 	// DocsDefault says which book a search gives when the model names no
 	// release line.
-	DocsDefault = "the release line the nodes of this cluster run, the oldest when they differ"
+	DocsDefault = "the release line the nodes of this cluster run, the newest when they differ"
+	// CodeDefault says which code a search reads when the model names no
+	// version.
+	CodeDefault = "the code of the version the nodes of this cluster run, the newest when they differ"
 	// DocsUnknown says the version of the cluster could not be read.
 	DocsUnknown = "The version the nodes of this cluster run could not be read"
 )
 
 // ClusterVersions reads the version the nodes of the cluster of a request
 // run, through the MCP, for the documentation to give the book of its
-// release line.
+// release line, and the code search the code of that version: a
+// conversation of om3 is about this cluster.
 type ClusterVersions struct {
 	now func() time.Time
 
@@ -46,7 +50,7 @@ func NewClusterVersions() *ClusterVersions {
 	return &ClusterVersions{now: time.Now, versions: map[string]knownVersion{}}
 }
 
-// Version is the oldest version the nodes of the cluster of the request
+// Version is the newest version the nodes of the cluster of the request
 // report, read through the MCP and kept versionLifetime; empty when the MCP
 // gives none, such as a tool error. A failed MCP transport is an error,
 // which ends the turn.
@@ -92,12 +96,12 @@ type nodePage struct {
 	} `json:"nodes"`
 }
 
-// reportedVersion is the oldest version the nodes of the cluster report, the
+// reportedVersion is the newest version the nodes of the cluster report, the
 // commits past a tag counted, every page of them read; empty when a page is a tool error
 // or cannot be read, the nodes are more than versionPages pages, or none
 // reports a version; an error when the MCP transport fails.
 func reportedVersion(ctx context.Context, session agent.MCPSession) (string, error) {
-	oldest, cursor := "", ""
+	newest, cursor := "", ""
 	for range versionPages {
 		arguments := map[string]any{"node_limit": versionPageNodes, "object_limit": 1}
 		if cursor != "" {
@@ -124,12 +128,12 @@ func reportedVersion(ctx context.Context, session agent.MCPSession) (string, err
 			if node.Status == nil || docs.Line(node.Status.AgentVersion) == "" {
 				continue
 			}
-			if oldest == "" || docs.OlderVersion(node.Status.AgentVersion, oldest) {
-				oldest = node.Status.AgentVersion
+			if newest == "" || docs.OlderVersion(newest, node.Status.AgentVersion) {
+				newest = node.Status.AgentVersion
 			}
 		}
 		if !page.Nodes.Truncated {
-			return oldest, nil
+			return newest, nil
 		}
 		if cursor = page.Nodes.NextCursor; cursor == "" {
 			return "", nil

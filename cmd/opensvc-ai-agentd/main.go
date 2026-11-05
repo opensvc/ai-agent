@@ -83,13 +83,15 @@ func main() {
 		oc3Docs = agent.Books{Shelf: shelf, Unasked: oc3.DocsUnasked}
 		oc3Prompt += "\n" + oc3.DocsPrompt
 	}
-	// One shelf of code serves both backends: the latest code of the
-	// daemon, or the version the user names, read the first time a search
-	// asks for it.
+	// One shelf of code serves both backends, the code of a version read
+	// the first time a search asks for it: on om3, the version the cluster
+	// of the conversation runs, as its book; on oc3, a fleet, the latest
+	// code; on both, the version the user names.
 	var om3Code, oc3Code agent.CodeSource
 	if docsConfig.CodeURL != "" {
 		codeShelf := docs.NewCodeShelf(&http.Client{Timeout: 2 * time.Minute}, docsConfig.CodeURL, docsConfig.CodeRef, log.Printf)
-		om3Code, oc3Code = codeShelf, codeShelf
+		om3Code = agent.Codes{Shelf: codeShelf, Default: clusterVersions.Version, DefaultIs: om3.CodeDefault, Unknown: om3.DocsUnknown}
+		oc3Code = agent.Codes{Shelf: codeShelf}
 		om3Prompt += "\n" + om3.CodePrompt
 		oc3Prompt += "\n" + oc3.CodePrompt
 		log.Printf("code: the daemon source at %s, the latest at %s", docsConfig.CodeURL, docsConfig.CodeRef)

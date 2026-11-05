@@ -498,7 +498,7 @@ cannot be read.
 The tool lists the release lines with a book, and the model names the one
 the question is about, as the tools reported the agent version of the nodes
 concerned. When it names none, the `om3` backend searches the book of the
-line the nodes of the cluster of the request run, the oldest when they
+line the nodes of the cluster of the request run, the newest when they
 differ, read through the MCP once in 5 minutes per cluster, every page of
 the nodes, a cluster of more than 1000 nodes or a version that cannot be
 read, such as on a tool error, taking the latest book, the result saying so;
@@ -520,11 +520,16 @@ When the agent has the code of the daemon, with `OPENSVC_AI_CODE_URL`, both
 backends offer the model a second tool of the agent's own, `search_code`,
 and their system prompt keeps it for why the daemon behaves as it does or
 how a part of it works inside, usage questions being answered from the
-documentation. A search reads the latest code of the daemon, the archive of
-`OPENSVC_AI_CODE_REF`, `main` by default, read again every 6 hours in the
-background, the searches served the code read before until the new read
-ends, the result saying a cluster may run another version; the model names
-a version only when the user names one, a tag such as `v3.0.0-rc56`, the
+documentation. On `om3`, a search that names no version reads the code of
+the version the nodes of the cluster of the request run, the newest when
+they differ, the version `search_docs` reads too, through the same MCP read,
+audited as an agent call of purpose `code_version`; when that version
+cannot be read, or its code cannot, the latest code, the result saying so.
+On `oc3`, a fleet, a search that names no version reads the latest code of
+the daemon, the archive of `OPENSVC_AI_CODE_REF`, `main` by default, read
+again every 6 hours in the background, the searches served the code read
+before until the new read ends, the result saying a cluster may run another
+version. The model names a version only when the user names one, a tag such as `v3.0.0-rc56`, the
 `v` added when it is missing, or a commit, or `v3.0.0-rc56-41-g451250d44`,
 whose commit is read, else, when it is not published, its tag, the result
 saying the code is not exactly that version; a version with no published
@@ -538,9 +543,9 @@ does, the file of the declarations found when it is short, else the run of
 its declarations, up to 6 KiB, holding them, with its path and lines, 16 KiB
 in all. A search takes English keywords or Go identifiers, an optional
 `limit` and an optional `version`. The code of a version is read the first
-time a search asks for it, a failed read asked again 10 minutes later; the
-latest code and one named version are kept, the least recently used named
-version leaving, never one still read. A question searches the code 6 times
+time a search asks for it, a failed read asked again 10 minutes later;
+three versions are kept, the latest code always among them, the least
+recently used other version leaving, never one still read. A question searches the code 6 times
 at most, across the confirmations it waits on: a search past them is a tool
 error telling the model to answer with the code read.
 The name is the agent's: an MCP tool named `search_code` fails the turn.

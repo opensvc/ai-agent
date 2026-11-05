@@ -71,13 +71,16 @@ func clusterContext(cluster string) context.Context {
 	return auth.WithMCPHeaders(context.Background(), headers)
 }
 
-func TestClusterVersionIsTheOldestOfItsNodesReadOnce(t *testing.T) {
+// TestClusterVersionIsTheNewestOfItsNodesReadOnce reads the newest version
+// the nodes report: a conversation of om3 is about the cluster, which runs
+// its newest version once it is upgraded.
+func TestClusterVersionIsTheNewestOfItsNodesReadOnce(t *testing.T) {
 	versions := NewClusterVersions()
 	clock := time.Now()
 	versions.now = func() time.Time { return clock }
 	session := &statusSession{versions: []string{"v3.1.0-rc2", "v3.0.0-rc56-41-g451250d44", ""}}
 	for range 3 {
-		if got, _ := versions.Version(clusterContext("c1"), session); got != "v3.0.0-rc56-41-g451250d44" {
+		if got, _ := versions.Version(clusterContext("c1"), session); got != "v3.1.0-rc2" {
 			t.Fatalf("version = %q", got)
 		}
 	}
@@ -118,9 +121,9 @@ func TestClusterVersionIsEmptyWhenTheMCPGivesNone(t *testing.T) {
 }
 
 func TestClusterVersionReadsEveryPageOfNodes(t *testing.T) {
-	// The oldest node is on the last page.
-	session := &statusSession{pages: [][]string{{"v3.1.0"}, {"v3.1.2"}, {"v3.0.0-rc56"}}}
-	if got, _ := NewClusterVersions().Version(clusterContext("c1"), session); got != "v3.0.0-rc56" || session.calls != 3 {
+	// The newest node is on the last page.
+	session := &statusSession{pages: [][]string{{"v3.1.0"}, {"v3.0.0-rc56"}, {"v3.1.2"}}}
+	if got, _ := NewClusterVersions().Version(clusterContext("c1"), session); got != "v3.1.2" || session.calls != 3 {
 		t.Errorf("version = %q after %d calls", got, session.calls)
 	}
 	// A cluster of more pages than read, or a page truncated with no
@@ -138,14 +141,14 @@ func TestClusterVersionReadsEveryPageOfNodes(t *testing.T) {
 	}
 }
 
-// TestClusterVersionIsTheOldestCommitInARollingUpgrade reads, of nodes of one
-// release line in a rolling upgrade, the oldest commit, whatever their order.
-func TestClusterVersionIsTheOldestCommitInARollingUpgrade(t *testing.T) {
+// TestClusterVersionIsTheNewestCommitInARollingUpgrade reads, of nodes of one
+// release line in a rolling upgrade, the newest commit, whatever their order.
+func TestClusterVersionIsTheNewestCommitInARollingUpgrade(t *testing.T) {
 	for _, versions := range [][]string{
 		{"v3.0.0-rc47-2-gaaaaaaa", "v3.0.0-rc46-12-gbbbbbbb"},
 		{"v3.0.0-rc46-12-gbbbbbbb", "v3.0.0-rc47-2-gaaaaaaa"},
 	} {
-		if got, _ := NewClusterVersions().Version(clusterContext("c1"), &statusSession{versions: versions}); got != "v3.0.0-rc46-12-gbbbbbbb" {
+		if got, _ := NewClusterVersions().Version(clusterContext("c1"), &statusSession{versions: versions}); got != "v3.0.0-rc47-2-gaaaaaaa" {
 			t.Errorf("%v: version = %q", versions, got)
 		}
 	}
