@@ -117,6 +117,32 @@ func TestServiceFailedTurnDoesNotPersistPartialMessages(t *testing.T) {
 	}
 }
 
+// TestServiceFailsATurnWhoseRunnerPanics fails the turn of a runner that
+// panics, rather than leave it running until a restart, and lets the panic
+// go on to the server.
+func TestServiceFailsATurnWhoseRunnerPanics(t *testing.T) {
+	store := newServiceTestStore()
+	runner := turnRunnerFunc(func(context.Context, []llm.Message, string, agent.EmitFunc) (agent.TurnResult, error) {
+		panic("nil annotations")
+	})
+	service := newTestService(t, store, runner)
+	execution, err := service.PrepareTurn(t.Context(), serviceTestIdentity(), store.item.ID, "status")
+	if err != nil {
+		t.Fatalf("prepare turn: %v", err)
+	}
+	func() {
+		defer func() {
+			if r := recover(); r != "nil annotations" {
+				t.Errorf("the panic did not go on: %v", r)
+			}
+		}()
+		_ = execution.Run(t.Context(), func(agent.Event) error { return nil })
+	}()
+	if !store.failed || store.failureCode != "agent_panicked" || store.completed {
+		t.Fatalf("turn failed=%t code=%q completed=%t", store.failed, store.failureCode, store.completed)
+	}
+}
+
 func TestServiceRejectsExpiredAndBusyConversation(t *testing.T) {
 	store := newServiceTestStore()
 	service := newTestService(t, store, turnRunnerFunc(func(context.Context, []llm.Message, string, agent.EmitFunc) (agent.TurnResult, error) {
@@ -286,6 +312,10 @@ func (s *serviceTestStore) PutFeedback(context.Context, Owner, string, FeedbackR
 func (s *serviceTestStore) DeleteFeedback(context.Context, Owner, string, string) error {
 	return ErrNotFound
 }
+func (s *serviceTestStore) ExpireConfirmations(context.Context, time.Time, int) (int64, error) {
+	return 0, nil
+}
+
 func (s *serviceTestStore) DeleteExpiredFeedback(context.Context, time.Time, int) (int64, error) {
 	return 0, nil
 }

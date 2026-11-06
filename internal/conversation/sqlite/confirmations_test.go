@@ -247,3 +247,38 @@ func TestStoreNamesThePromptWithTheIDOfTheClient(t *testing.T) {
 		t.Fatal("an invalid prompt ID was recorded")
 	}
 }
+
+// TestStoreExpiresAbandonedConfirmations fails the turns whose confirmation
+// expired and deletes their state, without waiting for a new turn of their
+// conversation; a confirmation still pending stays.
+func TestStoreExpiresAbandonedConfirmations(t *testing.T) {
+	store, _ := openTestStore(t, Config{})
+	for _, id := range []string{"conversation-1", "conversation-2"} {
+		if err := store.CreateConversation(t.Context(), testConversation(id, testOwner, testNow)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	suspendTestTurn(t, store, "conversation-1", "turn-1", "confirmation-1", testNow)
+	suspendTestTurn(t, store, "conversation-2", "turn-2", "confirmation-2", testNow.Add(5*time.Minute))
+	if _, err := store.ExpireConfirmations(t.Context(), testNow, 0); !errors.Is(err, conversation.ErrInvalid) {
+		t.Fatalf("a zero limit: %v", err)
+	}
+	expired, err := store.ExpireConfirmations(t.Context(), testNow.Add(11*time.Minute), 10)
+	if err != nil || expired != 1 {
+		t.Fatalf("ExpireConfirmations() = %d, %v", expired, err)
+	}
+	var status, code string
+	if err := store.db.QueryRowContext(t.Context(), "SELECT status, error_code FROM turns WHERE id = 'turn-1'").Scan(&status, &code); err != nil {
+		t.Fatal(err)
+	}
+	var left int
+	if err := store.db.QueryRowContext(t.Context(), "SELECT COUNT(*) FROM confirmations WHERE turn_id = 'turn-1'").Scan(&left); err != nil {
+		t.Fatal(err)
+	}
+	if status != string(conversation.TurnFailed) || code != confirmationExpiredCode || left != 0 {
+		t.Fatalf("turn-1 %s %q, %d confirmations left", status, code, left)
+	}
+	if got, err := store.GetPendingConfirmation(t.Context(), testOwner, "conversation-2", testNow.Add(11*time.Minute)); err != nil || got == nil {
+		t.Fatalf("the pending confirmation: %+v, %v", got, err)
+	}
+}

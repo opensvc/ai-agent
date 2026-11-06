@@ -297,9 +297,15 @@ func serveConversationRun(backend string, service ConversationService, limiter *
 		started := streamRun(response, request, audit, "conversation_run", attributes, codec, func(emit agent.EmitFunc) error {
 			return execution.Run(runContext, emit)
 		})
+		// A turn the run did not take, its stream unavailable or its
+		// opening frame not written, is canceled: its row never stays
+		// running until a restart. A turn the run took is consumed, and
+		// this does nothing.
+		code := "stream_not_started"
 		if !started {
-			_ = execution.Cancel("streaming_unavailable")
+			code = "streaming_unavailable"
 		}
+		_ = execution.Cancel(code)
 	}
 }
 
