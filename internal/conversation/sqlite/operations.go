@@ -24,6 +24,19 @@ const (
 	maxListLimit       = 1000
 )
 
+// storedBytes sums the bytes the conversations of owner store, on its
+// backend and cluster, and those of the database. The cluster is the
+// tenant: a local user of om3 names its node as its issuer, which another
+// cluster may name too.
+func (s *Store) storedBytes(ctx context.Context, tx *sql.Tx, owner conversation.Owner) (user int64, database int64, err error) {
+	if err := tx.QueryRowContext(ctx, `
+SELECT COALESCE(SUM(CASE WHEN backend = ? AND cluster_id = ? AND issuer = ? AND subject = ? THEN stored_bytes ELSE 0 END), 0), COALESCE(SUM(stored_bytes), 0)
+FROM conversations`, owner.Backend, owner.ClusterID, owner.Issuer, owner.Subject).Scan(&user, &database); err != nil {
+		return 0, 0, fmt.Errorf("sum conversation bytes: %w", err)
+	}
+	return user, database, nil
+}
+
 func (s *Store) CreateConversation(ctx context.Context, item conversation.Conversation) error {
 	if err := validateConversation(item); err != nil {
 		return err
@@ -222,6 +235,18 @@ WHERE conversation_id = ?`, conversationID).Scan(&count, &maximumSequence, &runn
 	if count >= s.config.MaxTurns {
 		return conversation.Turn{}, fmt.Errorf("%w: maximum turn count is %d", conversation.ErrLimit, s.config.MaxTurns)
 	}
+	// A turn without room left to store would call the model and the tools,
+	// then fail: it is refused before.
+	userBytes, databaseBytes, err := s.storedBytes(ctx, tx, owner)
+	if err != nil {
+		return conversation.Turn{}, err
+	}
+	if userBytes >= s.config.MaxUserBytes {
+		return conversation.Turn{}, fmt.Errorf("%w: a user stores at most %d bytes", conversation.ErrUserLimit, s.config.MaxUserBytes)
+	}
+	if databaseBytes >= s.config.MaxDatabaseBytes {
+		return conversation.Turn{}, fmt.Errorf("%w: maximum database size is %d bytes", conversation.ErrLimit, s.config.MaxDatabaseBytes)
+	}
 	turn := conversation.Turn{
 		ID:             turnID,
 		ConversationID: conversationID,
@@ -303,9 +328,14 @@ WHERE t.conversation_id = ?`, conversationID).Scan(&messageCount); err != nil {
 	if exceedsLimit(storedBytes, addedBytes, s.config.MaxConversationBytes) {
 		return fmt.Errorf("%w: maximum conversation size is %d bytes", conversation.ErrLimit, s.config.MaxConversationBytes)
 	}
-	var databaseBytes int64
-	if err := tx.QueryRowContext(ctx, "SELECT COALESCE(SUM(stored_bytes), 0) FROM conversations").Scan(&databaseBytes); err != nil {
-		return fmt.Errorf("sum conversation bytes: %w", err)
+	userBytes, databaseBytes, err := s.storedBytes(ctx, tx, owner)
+	if err != nil {
+		return err
+	}
+	// The share of the user first: one user filling the database would
+	// make the turns of every other fail.
+	if exceedsLimit(userBytes, addedBytes, s.config.MaxUserBytes) {
+		return fmt.Errorf("%w: a user stores at most %d bytes", conversation.ErrUserLimit, s.config.MaxUserBytes)
 	}
 	if exceedsLimit(databaseBytes, addedBytes, s.config.MaxDatabaseBytes) {
 		return fmt.Errorf("%w: maximum database size is %d bytes", conversation.ErrLimit, s.config.MaxDatabaseBytes)

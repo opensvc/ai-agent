@@ -115,6 +115,7 @@ func main() {
 		MaxConversations:     conversationConfig.MaxConversations,
 		MaxUserConversations: conversationConfig.MaxUserConversations,
 		MaxDatabaseBytes:     conversationConfig.MaxDatabaseBytes,
+		MaxUserBytes:         conversationConfig.MaxUserBytes,
 	})
 	if err != nil {
 		cancelStartup()
@@ -161,9 +162,10 @@ func main() {
 	}()
 	auditLogger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	handler, err := api.NewHandler(backends, api.HandlerConfig{
-		MaxConcurrentAsks:  processConfig.MaxConcurrentAsks,
-		AuditLogger:        auditLogger,
-		CORSAllowedOrigins: processConfig.CORSAllowedOrigins,
+		MaxConcurrentAsks:        processConfig.MaxConcurrentAsks,
+		MaxConcurrentAsksPerUser: processConfig.MaxConcurrentAsksPerUser,
+		AuditLogger:              auditLogger,
+		CORSAllowedOrigins:       processConfig.CORSAllowedOrigins,
 	})
 	if err != nil {
 		_ = conversationStore.Close()

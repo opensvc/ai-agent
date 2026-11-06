@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/opensvc/ai-agent/internal/agent"
+	"github.com/opensvc/ai-agent/internal/conversation"
 	"github.com/opensvc/ai-agent/internal/llm"
 )
 
@@ -72,17 +73,25 @@ type APIError struct {
 	Message string `json:"message"`
 }
 
-func acquireAgentSlot(response http.ResponseWriter, request *http.Request, limiter *askLimiter, audit auditLogger, prefix string, attributes []slog.Attr) bool {
-	if limiter.tryAcquire() {
+// acquireAgentSlot takes a run slot for the user of key, or answers 429:
+// too_many_requests when the instance runs as many as it may,
+// too_many_user_requests when the user does.
+func acquireAgentSlot(response http.ResponseWriter, request *http.Request, limiter *askLimiter, key string, audit auditLogger, prefix string, attributes []slog.Attr) bool {
+	refusal := limiter.tryAcquire(key)
+	if refusal == limiterAccepted {
 		return true
+	}
+	code, message := "too_many_requests", "too many agent requests are already running"
+	if refusal == limiterUserFull {
+		code, message = "too_many_user_requests", "you already run as many agent requests as you may: wait for one to end"
 	}
 	attributes = append(append([]slog.Attr(nil), attributes...),
 		slog.Int("status", http.StatusTooManyRequests),
-		slog.String("code", "too_many_requests"),
+		slog.String("code", code),
 	)
 	audit.event(request.Context(), prefix+"_rejected", attributes...)
 	response.Header().Set("Retry-After", "1")
-	writeJSONError(response, http.StatusTooManyRequests, "too_many_requests", "too many agent requests are already running")
+	writeJSONError(response, http.StatusTooManyRequests, code, message)
 	return false
 }
 
@@ -299,6 +308,14 @@ func streamRun(response http.ResponseWriter, request *http.Request, audit auditL
 		} else if errors.Is(err, agent.ErrClientToolConflict) {
 			code = "tool_name_conflict"
 			message = "a tool of the client is named as a tool of the agent; rename it"
+		} else if errors.Is(err, conversation.ErrUserLimit) {
+			// The turn could not be stored: the quota of the user, or the
+			// room of the instance, rather than a failure of the agent.
+			code = "conversation_quota"
+			message = "your conversation storage quota is reached: delete conversations, or wait for them to expire"
+		} else if errors.Is(err, conversation.ErrLimit) {
+			code = "conversation_limit"
+			message = "the conversation storage limit has been reached"
 		}
 		if frame, err := codec.failure(code, message); err == nil && len(frame) > 0 {
 			_ = write(func() error { return writeFrame(response, flusher, &streamBytes, frame) })
@@ -326,6 +343,12 @@ func streamFailureCode(err error, completed bool, writeFailed bool, contextErr e
 	if err != nil {
 		if completed {
 			return "agent_cleanup_failed"
+		}
+		switch {
+		case errors.Is(err, conversation.ErrUserLimit):
+			return "conversation_quota"
+		case errors.Is(err, conversation.ErrLimit):
+			return "conversation_limit"
 		}
 		return "agent_failed"
 	}

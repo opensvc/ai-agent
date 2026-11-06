@@ -82,6 +82,8 @@ func writeFeedbackError(response http.ResponseWriter, request *http.Request, aud
 	switch {
 	case errors.Is(err, conversation.ErrNotFound):
 		status, code, message = http.StatusNotFound, "feedback_target_not_found", "the conversation, the turn or its feedback was not found"
+	case errors.Is(err, conversation.ErrUserLimit):
+		code, message = "feedback_quota", "your feedback quota is reached: withdraw feedback, or wait for it to expire"
 	case errors.Is(err, conversation.ErrLimit):
 		code, message = "feedback_limit", "the feedback limit has been reached"
 	case errors.Is(err, conversation.ErrInvalid):

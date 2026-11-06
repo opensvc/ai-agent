@@ -13,19 +13,25 @@ import (
 const (
 	DefaultListenAddress     = "127.0.0.1:8090"
 	DefaultMaxConcurrentAsks = 4
-	DefaultShutdownTimeout   = 30 * time.Second
-	maximumMaxConcurrentAsks = 128
-	minimumShutdownTimeout   = time.Second
-	maximumShutdownTimeout   = 5 * time.Minute
+	// DefaultMaxConcurrentAsksPerUser bounds the runs of one user at once,
+	// so that one user cannot hold every run slot of the instance.
+	DefaultMaxConcurrentAsksPerUser = 2
+	DefaultShutdownTimeout          = 30 * time.Second
+	maximumMaxConcurrentAsks        = 128
+	minimumShutdownTimeout          = time.Second
+	maximumShutdownTimeout          = 5 * time.Minute
 )
 
 type Config struct {
-	ListenAddress      string
-	TLSCertFile        string
-	TLSKeyFile         string
-	MaxConcurrentAsks  int
-	ShutdownTimeout    time.Duration
-	CORSAllowedOrigins []string
+	ListenAddress     string
+	TLSCertFile       string
+	TLSKeyFile        string
+	MaxConcurrentAsks int
+	// MaxConcurrentAsksPerUser bounds the runs of one user, issuer and
+	// subject on every backend and cluster, at most MaxConcurrentAsks.
+	MaxConcurrentAsksPerUser int
+	ShutdownTimeout          time.Duration
+	CORSAllowedOrigins       []string
 }
 
 func Load() (Config, error) {
@@ -62,6 +68,18 @@ func load(getenv func(string) string) (Config, error) {
 		}
 		maxConcurrentAsks = parsed
 	}
+	maxConcurrentAsksPerUser := min(DefaultMaxConcurrentAsksPerUser, maxConcurrentAsks)
+	if value := strings.TrimSpace(getenv("OPENSVC_AI_MAX_CONCURRENT_ASKS_PER_USER")); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 1 || parsed > maxConcurrentAsks {
+			return Config{}, fmt.Errorf(
+				"parse OPENSVC_AI_MAX_CONCURRENT_ASKS_PER_USER %q: expected an integer between 1 and OPENSVC_AI_MAX_CONCURRENT_ASKS, %d",
+				value,
+				maxConcurrentAsks,
+			)
+		}
+		maxConcurrentAsksPerUser = parsed
+	}
 	shutdownTimeout := DefaultShutdownTimeout
 	if value := strings.TrimSpace(getenv("OPENSVC_AI_SHUTDOWN_TIMEOUT")); value != "" {
 		parsed, err := time.ParseDuration(value)
@@ -80,12 +98,13 @@ func load(getenv func(string) string) (Config, error) {
 		return Config{}, fmt.Errorf("parse OPENSVC_AI_CORS_ALLOWED_ORIGINS: %w", err)
 	}
 	return Config{
-		ListenAddress:      address,
-		TLSCertFile:        certFile,
-		TLSKeyFile:         keyFile,
-		MaxConcurrentAsks:  maxConcurrentAsks,
-		ShutdownTimeout:    shutdownTimeout,
-		CORSAllowedOrigins: origins,
+		ListenAddress:            address,
+		TLSCertFile:              certFile,
+		TLSKeyFile:               keyFile,
+		MaxConcurrentAsks:        maxConcurrentAsks,
+		MaxConcurrentAsksPerUser: maxConcurrentAsksPerUser,
+		ShutdownTimeout:          shutdownTimeout,
+		CORSAllowedOrigins:       origins,
 	}, nil
 }
 

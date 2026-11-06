@@ -86,6 +86,34 @@ func TestLoadShutdownTimeout(t *testing.T) {
 	}
 }
 
+func TestLoadMaxConcurrentAsksPerUser(t *testing.T) {
+	env := func(asks, perUser string) func(string) string {
+		return func(key string) string {
+			switch key {
+			case "OPENSVC_AI_MAX_CONCURRENT_ASKS":
+				return asks
+			case "OPENSVC_AI_MAX_CONCURRENT_ASKS_PER_USER":
+				return perUser
+			}
+			return processEnv(nil)(key)
+		}
+	}
+	for _, test := range []struct {
+		asks, perUser string
+		want          int
+	}{{"", "", 2}, {"1", "", 1}, {"8", "3", 3}, {"8", "8", 8}} {
+		config, err := load(env(test.asks, test.perUser))
+		if err != nil || config.MaxConcurrentAsksPerUser != test.want {
+			t.Errorf("asks %q, per user %q: %d, %v, want %d", test.asks, test.perUser, config.MaxConcurrentAsksPerUser, err, test.want)
+		}
+	}
+	for _, perUser := range []string{"0", "5", "x"} {
+		if _, err := load(env("4", perUser)); err == nil {
+			t.Errorf("per user %q accepted", perUser)
+		}
+	}
+}
+
 func TestLoadMaxConcurrentAsks(t *testing.T) {
 	config, err := load(func(key string) string {
 		if key == "OPENSVC_AI_MAX_CONCURRENT_ASKS" {

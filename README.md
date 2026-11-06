@@ -117,12 +117,14 @@ webapp origins, or `*` to allow all origins. Empty by default. See the
 | `OPENSVC_AI_CONVERSATION_MAX` | `4096` conversations for the instance | 1 to 1000000 |
 | `OPENSVC_AI_CONVERSATION_MAX_PER_USER` | `128`, or the instance limit if lower | 1 to the instance limit |
 | `OPENSVC_AI_CONVERSATION_MAX_DATABASE_MIB` | `256` | `32` to `1048576` |
+| `OPENSVC_AI_CONVERSATION_MAX_USER_MIB` | an eighth of the database, at least `32` | `32` to the database size: the messages one user stores on a backend and cluster |
 | `OPENSVC_AI_OC3_MCP_SOCKET` | unset: `oc3` not served | absolute path |
 | `OPENSVC_AI_DOCS_URL` | unset: no documentation search | `https` URL of the root of the book, such as `https://book.opensvc.com/`; one naming its `llms.txt` is its directory |
 | `OPENSVC_AI_CODE_URL` | unset: no code search | `https` URL of a tar.gz archive of the om3 source holding `{ref}`, such as `https://codeload.github.com/opensvc/om3/tar.gz/{ref}` |
 | `OPENSVC_AI_CODE_REF` | `main` | git reference of the latest code, read by an `oc3` code search that names no version, or an `om3` one whose cluster version cannot be read |
 | `OPENSVC_AI_CORS_ALLOWED_ORIGINS` | empty: no CORS | exact origins or `*` |
-| `OPENSVC_AI_MAX_CONCURRENT_ASKS` | `4` | 1 to 128 |
+| `OPENSVC_AI_MAX_CONCURRENT_ASKS` | `4` | 1 to 128: the runs of the whole instance, every user, backend and cluster together |
+| `OPENSVC_AI_MAX_CONCURRENT_ASKS_PER_USER` | `2`, or the instance limit if lower | 1 to the instance limit: the runs of one user of a backend and cluster at once |
 | `OPENSVC_AI_SHUTDOWN_TIMEOUT` | `30s` | `1s` to `5m` |
 | `OPENSVC_AI_AGENT_MAX_ITERATIONS` | `8` | 1 to 32 |
 | `OPENSVC_AI_AGENT_TIMEOUT` | `5m` | `1s` to `30m` |

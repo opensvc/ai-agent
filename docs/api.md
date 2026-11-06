@@ -176,8 +176,26 @@ Only one turn runs at a time in a conversation.
   `OPENSVC_AI_CONVERSATION_MAX_DATABASE_MIB` of stored messages, 256 MiB by
   default; beyond, 409 `conversation_limit`. The expired conversations are
   deleted before each creation counts.
+- **Stored bytes.** A user stores at most `OPENSVC_AI_CONVERSATION_MAX_USER_MIB`
+  of messages on a backend and cluster, by default an eighth of the
+  database, at least the size of one conversation, 32 MiB: one user cannot
+  fill the database for the others. A run is refused with 409
+  `conversation_quota` once the user's share is reached, `conversation_limit`
+  once the database is full, before the model is called. That check avoids
+  the certain case only: a turn that would pass either limit when stored ends
+  with `RUN_ERROR` `conversation_quota` or `conversation_limit`, its model
+  calls spent, and is not stored.
 
 ## Runs
+
+The instance runs at most `OPENSVC_AI_MAX_CONCURRENT_ASKS` runs at once, 4
+by default, every user, backend and cluster together, and a user at most
+`OPENSVC_AI_MAX_CONCURRENT_ASKS_PER_USER`, 2 by default: one user cannot hold
+every slot. A user is counted per backend and cluster, the tenant, by their
+issuer and subject: a local user of om3 names its node as its issuer, which
+the node of another cluster may share.
+Beyond, a run is refused with 429 and `Retry-After`: `too_many_requests` for
+the instance, `too_many_user_requests` for the user.
 
 `POST /v1/{backend}/conversations/{id}/runs` runs the agent on a
 conversation for a client of the [AG-UI protocol](https://docs.ag-ui.com),
@@ -244,7 +262,7 @@ in milliseconds:
 | tool result | `TOOL_CALL_RESULT` with the JSON result the model read, `{"content", "structuredContent", "isError"}`, `isError` `true` for a refusal of the MCP tool and `false` otherwise, or a note of its size beyond 64 KiB |
 | completion | `RUN_FINISHED`, `outcome` `{"type":"success"}`, `result` `{"turnId": …}` for the feedback |
 | confirmation | the call as a tool call, then `RUN_FINISHED`, `outcome` `interrupt` |
-| failure | `RUN_ERROR` with a `code`, `request_timeout`, `tool_name_conflict` or `agent_failed`, and a `message` for the developer |
+| failure | `RUN_ERROR` with a `code`, `request_timeout`, `tool_name_conflict`, `conversation_quota` or `conversation_limit` (the turn could not be stored, see Quotas) or `agent_failed`, and a `message` for the developer |
 
 `RUN_FINISHED` and `RUN_ERROR` carry `usage`, one `TokenUsage`
 `{inputTokens, outputTokens, totalTokens}` summing the model calls of the
@@ -732,7 +750,16 @@ until `OPENSVC_AI_FEEDBACK_RETENTION` (180 days by default) ends. The
 context is bounded to 16 KiB: beyond, it leaves out the shown tools of the
 runs, counted in `shown_tools_omitted`, then the runs between the first and
 the last, counted in `runs_omitted`, and sets `truncated`. The agent
-keeps at most 4096 feedback; beyond, a new one returns 409 `feedback_limit`.
+keeps at most 4096 feedback, a user at most an eighth of them on the turns of
+their conversations of a backend and cluster; beyond their share, a new one
+returns 409 `feedback_quota`. With the instance full, the oldest anonymous
+feedback, of a deleted conversation, makes room; without any, 409
+`feedback_limit`. The share counts the feedback of the conversations that
+exist: one holding no identity once its conversation is deleted, a user who
+rates then deletes again and again, one model turn per feedback, can fill the
+anonymous feedback, and push out the oldest, the others' included. The
+feedback stays anonymous by design; the cost of a turn per feedback is the
+bound.
 
 `opensvc-ai-agentd feedback export [-since 720h] [-with-tool-results]`, run on
 the agent host with its environment, writes the feedback created within the
