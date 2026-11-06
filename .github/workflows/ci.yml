@@ -17,9 +17,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      # The actions are pinned by commit: a tag moved does not change what
+      # runs. The token of the checkout is not left in .git/config.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: go.mod
 
@@ -40,8 +44,8 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      # Pinned: v0.7.0 is the latest release that builds with the Go version
-      # of go.mod (1.25); later releases require Go 1.26.
+      # Pinned: a release of staticcheck changes what it reports. v0.7.0
+      # still checks the language of the go line of go.mod (1.25).
       - name: Staticcheck
         run: go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
 
@@ -50,3 +54,22 @@ jobs:
 
       - name: Test
         run: go test -race -count=1 ./...
+
+  # The known vulnerabilities the code reaches, with the toolchain of go.mod,
+  # the Go of the image, whose standard library the binary carries. A new
+  # advisory fails it without any commit: the answer is a newer Go, in the
+  # toolchain line of go.mod and in the Dockerfile.
+  vulncheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version-file: go.mod
+
+      - name: Govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...

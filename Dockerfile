@@ -1,7 +1,12 @@
 # The image of the OpenSVC AI agent: the binary alone on alpine, run as
 # opensvc-ai, uid 995 and gid 983, the IDs the files and the sockets of the
 # service are given, the same on every node.
-FROM golang:1.25 AS builder
+# The base images are pinned by digest: a tag moved in the registry does not
+# change a release. The Go of the build is the toolchain line of go.mod, which
+# CI tests and checks for vulnerabilities with: change both together. It is
+# newer than the go line, the language version, for the fixes of the standard
+# library the binary carries, Go 1.25 getting no more of them.
+FROM golang:1.26.10@sha256:cfa27959837144bf4649802ba38e59daffd0dd2a7994aa83daaf113285b0f551 AS builder
 
 # VERSION is the version of the binary, from git describe; the git directory
 # is not in the build context.
@@ -15,7 +20,7 @@ RUN CGO_ENABLED=0 go build -trimpath -buildvcs=false \
         -ldflags="-s -w -X github.com/opensvc/ai-agent/internal/buildinfo.version=${VERSION}" \
         -o /out/opensvc-ai-agentd ./cmd/opensvc-ai-agentd
 
-FROM alpine:3.22.4
+FROM alpine:3.22.4@sha256:310c62b5e7ca5b08167e4384c68db0fd2905dd9c7493756d356e893909057601
 ARG BUILDTIME
 
 RUN addgroup -S -g 983 opensvc-ai \
