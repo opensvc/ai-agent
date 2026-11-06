@@ -21,6 +21,9 @@ type fakeCode struct {
 	// canceled the reads stopped by their context.
 	running, peak int
 	canceled      []string
+	// slow reads go on until released, their context done or not, as a
+	// download within its time does.
+	slow bool
 }
 
 func (f *fakeCode) fetch(ctx context.Context, ref string) ([]File, error) {
@@ -34,7 +37,9 @@ func (f *fakeCode) fetch(ctx context.Context, ref string) ([]File, error) {
 		f.running--
 		f.mu.Unlock()
 	}()
-	if wait != nil {
+	if wait != nil && f.slow {
+		<-wait
+	} else if wait != nil {
 		select {
 		case <-wait:
 		case <-ctx.Done():
@@ -395,4 +400,33 @@ func TestCodeShelfStopsAReadNobodyWaitsOn(t *testing.T) {
 	if index, _ := s.Code(context.Background(), "v3.0.1"); index == nil {
 		t.Error("v3.0.1 not read again")
 	}
+}
+
+// TestCodeShelfTimesAReadFromItsTurn waits for a place among the reads at
+// once without spending the time of the read: a version asked behind two
+// slow reads is read once its turn comes, not failed for having waited.
+func TestCodeShelfTimesAReadFromItsTurn(t *testing.T) {
+	release := make(chan struct{})
+	f := &fakeCode{refs: map[string]bool{"v3.0.1": true, "v3.0.2": true, "v3.0.3": true}, reads: map[string]int{},
+		hold: map[string]chan struct{}{"v3.0.1": release, "v3.0.2": release}, slow: true}
+	s, _ := codeShelf(f)
+	s.loadTimeout = 100 * time.Millisecond
+	var wg sync.WaitGroup
+	for _, v := range []string{"v3.0.1", "v3.0.2"} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.Code(context.Background(), v)
+		}()
+	}
+	waitFor(t, "two reads", func() bool {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		return f.running == maxCodeLoads
+	})
+	time.AfterFunc(3*s.loadTimeout, func() { close(release) })
+	if index, says := s.Code(context.Background(), "v3.0.3"); index == nil {
+		t.Errorf("a read that waited its turn: %q", says)
+	}
+	wg.Wait()
 }

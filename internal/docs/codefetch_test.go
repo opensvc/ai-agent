@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/iotest"
 )
 
 func TestCodeRefOfAVersion(t *testing.T) {
@@ -130,6 +131,11 @@ func TestBoundedReaderStopsPastItsLimit(t *testing.T) {
 	}
 	if err := read("abcde"); err == nil || !strings.Contains(err.Error(), "more than 4 bytes") {
 		t.Errorf("5 bytes: %v", err)
+	}
+	// A failure right at the limit, such as a corrupt stream, is not the end.
+	broken := io.MultiReader(strings.NewReader("abcd"), iotest.ErrReader(errors.New("corrupt")))
+	if _, err := io.ReadAll(&boundedReader{r: broken, left: 4, limit: 4}); err == nil || err.Error() != "corrupt" {
+		t.Errorf("a failure at the limit: %v", err)
 	}
 }
 

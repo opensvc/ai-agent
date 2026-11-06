@@ -40,8 +40,10 @@ type CodeShelf struct {
 	logf   func(format string, args ...any)
 	now    func() time.Time
 
-	// loads holds a token per read of code in progress, maxCodeLoads.
-	loads chan struct{}
+	// loads holds a token per read of code in progress, maxCodeLoads, and
+	// loadTimeout bounds a read once it holds one.
+	loads       chan struct{}
+	loadTimeout time.Duration
 
 	mu      sync.Mutex
 	entries map[string]*codeEntry
@@ -73,7 +75,7 @@ func NewCodeShelf(client *http.Client, template, latest string, logf func(format
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	s := &CodeShelf{client: client, template: template, latest: latest, logf: logf, now: time.Now, entries: map[string]*codeEntry{}, loads: make(chan struct{}, maxCodeLoads)}
+	s := &CodeShelf{client: client, template: template, latest: latest, logf: logf, now: time.Now, entries: map[string]*codeEntry{}, loads: make(chan struct{}, maxCodeLoads), loadTimeout: codeLoadTimeout}
 	s.fetch = func(ctx context.Context, ref string) ([]File, error) {
 		return FetchCode(ctx, s.client, s.template, ref)
 	}
@@ -161,7 +163,9 @@ func (s *CodeShelf) entry(version string) *codeEntry {
 		}
 		delete(s.entries, oldest)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), codeLoadTimeout)
+	// The read is stopped when its last search leaves; its timeout runs
+	// once it may start, not while it waits for its turn.
+	ctx, cancel := context.WithCancel(context.Background())
 	entry = &codeEntry{done: make(chan struct{}), used: s.used, waiters: 1, cancel: cancel}
 	s.entries[version] = entry
 	go func() {
@@ -191,7 +195,8 @@ func (s *CodeShelf) leave(version string, entry *codeEntry) {
 }
 
 // load reads and indexes the code of version once a place among the
-// maxCodeLoads reads at once is free, within ctx.
+// maxCodeLoads reads at once is free, within ctx, and within loadTimeout
+// from then: the wait for a place does not spend the time of the read.
 func (s *CodeShelf) load(ctx context.Context, version string) (*CodeIndex, string, error) {
 	select {
 	case s.loads <- struct{}{}:
@@ -199,15 +204,15 @@ func (s *CodeShelf) load(ctx context.Context, version string) (*CodeIndex, strin
 	case <-ctx.Done():
 		return nil, "", ctx.Err()
 	}
+	ctx, cancel := context.WithTimeout(ctx, s.loadTimeout)
+	defer cancel()
 	return s.read(ctx, version)
 }
 
 // refresh reads the latest code again, then puts it in place of old; a read
 // that fails keeps old, read again after shelfRetry.
 func (s *CodeShelf) refresh(old *codeEntry) {
-	ctx, cancel := context.WithTimeout(context.Background(), codeLoadTimeout)
-	defer cancel()
-	index, note, err := s.load(ctx, "")
+	index, note, err := s.load(context.Background(), "")
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	old.refreshing = false

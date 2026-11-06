@@ -186,7 +186,12 @@ func (b *boundedReader) Read(p []byte) (int, error) {
 		// One byte more tells an archive of exactly limit bytes, which is
 		// read, from a longer one.
 		var probe [1]byte
-		if n, _ := b.r.Read(probe[:]); n == 0 {
+		n, err := b.r.Read(probe[:])
+		if n == 0 {
+			// An error at the limit is told, not taken for the end.
+			if err != nil && err != io.EOF {
+				return 0, err
+			}
 			return 0, io.EOF
 		}
 		return 0, fmt.Errorf("%s of more than %d bytes", cmp.Or(b.what, "archive"), b.limit)
