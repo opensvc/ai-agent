@@ -66,6 +66,9 @@ type Store interface {
 	PutFeedback(context.Context, Owner, string, FeedbackRecord) (FeedbackRecord, error)
 	DeleteFeedback(context.Context, Owner, string, string) error
 	DeleteExpiredFeedback(context.Context, time.Time, int) (int64, error)
+	// ExpireConfirmations fails at most the given count of turns whose
+	// confirmation expired, deleting the confirmation and its state.
+	ExpireConfirmations(context.Context, time.Time, int) (int64, error)
 
 	RecoverInterrupted(context.Context, time.Time) (int64, error)
 	DeleteExpired(context.Context, time.Time, int) (int64, error)

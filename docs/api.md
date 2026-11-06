@@ -119,7 +119,12 @@ Only one turn runs at a time in a conversation.
   are truncated, without an additional model request. A failed first turn
   sets no title. A title set with `PATCH` is not replaced by later prompts.
 - **Failures.** Canceled, failed, timed-out and interrupted turns are not
-  added to the model context and their partial output is not stored.
+  added to the model context and their partial output is not stored. A turn
+  never stays running for its conversation: a run whose stream could not
+  start, or whose first frame could not be written, cancels it,
+  `streaming_unavailable` or `stream_not_started`; a run that panics fails
+  it, `agent_panicked`; a turn left running by a stop of the agent is
+  marked interrupted when it starts again.
 - **Tool calls.** A turn runs at most 8 tool calls per model answer and 16 in
   all. A model answer asking for more runs none of its calls: each is answered
   with a tool error naming the bound, and the model asks for fewer or answers
@@ -394,7 +399,9 @@ not on the clusters or the collector.
   no `TOOL_CALL_RESULT` for it, in this run or the next. The run gives no
   `turnId`: the turn is not complete.
 - **Wait.** The turn is stored as suspended, as for a confirmation, with
-  the same lifetime, 10 minutes, after which it fails: a resume answers 409
+  the same lifetime, 10 minutes, after which it fails, its state deleted at
+  the next purge of the expired conversations, on a creation or a listing:
+  a resume answers 409
   `confirmation_not_pending` meanwhile, and the conversation read gives no
   `pending_confirmation` for it.
 - **Answers.** The next run answers the calls with the tool messages its

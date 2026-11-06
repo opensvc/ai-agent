@@ -189,6 +189,58 @@ WHERE t.conversation_id = ? AND t.status = 'awaiting_confirmation' AND c.expires
 	return expireTurn(ctx, tx, conversationID, turnID, at)
 }
 
+// ExpireConfirmations fails at most limit turns whose confirmation expired
+// at at, deleting the confirmation and its state: an abandoned confirmation
+// leaves no state of up to 4 MiB for the lifetime of its conversation, which
+// a new turn of that conversation only cleared before.
+func (s *Store) ExpireConfirmations(ctx context.Context, at time.Time, limit int) (int64, error) {
+	if at.IsZero() {
+		return 0, fmt.Errorf("%w: expiry time is zero", conversation.ErrInvalid)
+	}
+	if limit < 1 || limit > maxListLimit {
+		return 0, fmt.Errorf("%w: expiry limit must be between 1 and %d", conversation.ErrInvalid, maxListLimit)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin confirmation expiry transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := tx.QueryContext(ctx, `
+SELECT c.turn_id, t.conversation_id
+FROM confirmations AS c JOIN turns AS t ON t.id = c.turn_id
+WHERE c.expires_at <= ?
+ORDER BY c.expires_at, c.turn_id
+LIMIT ?`, toUnixNano(at), limit)
+	if err != nil {
+		return 0, fmt.Errorf("read expired confirmations: %w", err)
+	}
+	type expired struct{ turnID, conversationID string }
+	var found []expired
+	for rows.Next() {
+		var e expired
+		if err := rows.Scan(&e.turnID, &e.conversationID); err != nil {
+			_ = rows.Close()
+			return 0, fmt.Errorf("read expired confirmation: %w", err)
+		}
+		found = append(found, e)
+	}
+	if err := errors.Join(rows.Err(), rows.Close()); err != nil {
+		return 0, fmt.Errorf("read expired confirmations: %w", err)
+	}
+	for _, e := range found {
+		if _, err := tx.ExecContext(ctx, "DELETE FROM confirmations WHERE turn_id = ?", e.turnID); err != nil {
+			return 0, fmt.Errorf("delete expired confirmation: %w", err)
+		}
+		if err := expireTurn(ctx, tx, e.conversationID, e.turnID, at); err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit confirmation expiry: %w", err)
+	}
+	return int64(len(found)), nil
+}
+
 func expireTurn(ctx context.Context, tx *sql.Tx, conversationID string, turnID string, at time.Time) error {
 	if _, err := tx.ExecContext(ctx, `
 UPDATE turns SET status = 'failed', error_code = ?, completed_at = ?

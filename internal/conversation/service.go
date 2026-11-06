@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"maps"
 	"slices"
 	"strings"
@@ -455,7 +456,8 @@ func (s *Service) DeleteExpired(ctx context.Context) (int64, error) {
 	return s.purgeExpired(ctx, s.now().UTC())
 }
 
-// purgeExpired deletes the expired conversations, then the expired
+// purgeExpired deletes the expired conversations, fails the turns whose
+// confirmation expired, deleting its state, then deletes the expired
 // feedback, and returns the number of conversations deleted.
 func (s *Service) purgeExpired(ctx context.Context, at time.Time) (int64, error) {
 	var total int64
@@ -466,6 +468,15 @@ func (s *Service) purgeExpired(ctx context.Context, at time.Time) (int64, error)
 		}
 		total += deleted
 		if deleted < int64(s.config.ExpiryDeleteBatch) {
+			break
+		}
+	}
+	for {
+		expired, err := s.store.ExpireConfirmations(ctx, at, s.config.ExpiryDeleteBatch)
+		if err != nil {
+			return total, fmt.Errorf("expire confirmations: %w", err)
+		}
+		if expired < int64(s.config.ExpiryDeleteBatch) {
 			break
 		}
 	}
@@ -582,6 +593,17 @@ func (t *PreparedTurn) Run(ctx context.Context, emit agent.EmitFunc) error {
 	if err := t.claim(); err != nil {
 		return err
 	}
+	// A panic of the runner or of the consumer fails the turn, rather than
+	// leave it running until a restart, and goes on to the server. A turn
+	// already ended stays as it ended.
+	defer func() {
+		if r := recover(); r != nil {
+			if err := t.service.failTurn(t.owner, t.conversationID, t.turnID, TurnFailed, "agent_panicked"); err != nil && !errors.Is(err, ErrConflict) {
+				log.Printf("record the failure of a turn whose run panicked, conversation %s, turn %s: %v", t.conversationID, t.turnID, err)
+			}
+			panic(r)
+		}
+	}()
 	if emit == nil {
 		err := errors.New("conversation event consumer is nil")
 		return errors.Join(err, t.service.failTurn(t.owner, t.conversationID, t.turnID, TurnFailed, "consumer_invalid"))
