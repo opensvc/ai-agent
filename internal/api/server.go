@@ -23,9 +23,12 @@ type HealthResponse struct {
 }
 
 type HandlerConfig struct {
-	MaxConcurrentAsks  int
-	AuditLogger        *slog.Logger
-	CORSAllowedOrigins []string
+	MaxConcurrentAsks int
+	// MaxConcurrentAsksPerUser bounds the runs of one user; 0 for
+	// MaxConcurrentAsks, no share.
+	MaxConcurrentAsksPerUser int
+	AuditLogger              *slog.Logger
+	CORSAllowedOrigins       []string
 }
 
 // Backend is one product the agent serves under /v1/{Name}. Its routes
@@ -64,7 +67,13 @@ func NewHandler(backends []Backend, config HandlerConfig) (http.Handler, error) 
 	if config.AuditLogger == nil {
 		return nil, fmt.Errorf("API audit logger is nil")
 	}
-	limiter := newAskLimiter(config.MaxConcurrentAsks)
+	if config.MaxConcurrentAsksPerUser == 0 {
+		config.MaxConcurrentAsksPerUser = config.MaxConcurrentAsks
+	}
+	if config.MaxConcurrentAsksPerUser < 0 || config.MaxConcurrentAsksPerUser > config.MaxConcurrentAsks {
+		return nil, fmt.Errorf("API max concurrent asks per user must be between 1 and the max concurrent asks")
+	}
+	limiter := newAskLimiter(config.MaxConcurrentAsks, config.MaxConcurrentAsksPerUser)
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", getHealth)
 	mux.HandleFunc("GET /openapi.json", getOpenAPI)

@@ -90,12 +90,8 @@ func (s *Store) PutFeedback(ctx context.Context, owner conversation.Owner, conve
 	stored, err := getFeedback(ctx, tx, record.TurnID)
 	switch {
 	case errors.Is(err, conversation.ErrNotFound):
-		var count int
-		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM feedback").Scan(&count); err != nil {
-			return conversation.FeedbackRecord{}, fmt.Errorf("count feedback: %w", err)
-		}
-		if count >= s.config.MaxFeedback {
-			return conversation.FeedbackRecord{}, fmt.Errorf("%w: feedback limit reached", conversation.ErrLimit)
+		if err := s.makeRoomForFeedback(ctx, tx, owner); err != nil {
+			return conversation.FeedbackRecord{}, err
 		}
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO feedback (id, turn_id, rating, reasons_json, expected, snapshot_json, context_json, created_at, updated_at, expires_at)
@@ -122,6 +118,38 @@ WHERE id = ?`, feedback.Rating, reasons, feedback.Expected, toUnixNano(record.Cr
 		return conversation.FeedbackRecord{}, fmt.Errorf("commit feedback: %w", err)
 	}
 	return stored, nil
+}
+
+// makeRoomForFeedback checks that owner may store one more feedback: at most
+// MaxUserFeedback on the turns of their conversations, its issuer and
+// subject on every backend and cluster. With the instance full, the oldest
+// feedback of a deleted conversation goes, which nobody can withdraw any
+// more: one user deleting the conversations they rated does not block the
+// feedback of the others for the retention.
+func (s *Store) makeRoomForFeedback(ctx context.Context, tx *sql.Tx, owner conversation.Owner) error {
+	var owned, count int
+	if err := tx.QueryRowContext(ctx, `
+SELECT
+  (SELECT COUNT(*) FROM feedback AS f JOIN turns AS t ON t.id = f.turn_id JOIN conversations AS c ON c.id = t.conversation_id
+   WHERE c.issuer = ? AND c.subject = ?),
+  (SELECT COUNT(*) FROM feedback)`, owner.Issuer, owner.Subject).Scan(&owned, &count); err != nil {
+		return fmt.Errorf("count feedback: %w", err)
+	}
+	if owned >= s.config.MaxUserFeedback {
+		return fmt.Errorf("%w: a user stores at most %d feedback", conversation.ErrUserLimit, s.config.MaxUserFeedback)
+	}
+	if count < s.config.MaxFeedback {
+		return nil
+	}
+	result, err := tx.ExecContext(ctx, `
+DELETE FROM feedback WHERE id = (SELECT id FROM feedback WHERE turn_id IS NULL ORDER BY created_at, id LIMIT 1)`)
+	if err != nil {
+		return fmt.Errorf("evict anonymous feedback: %w", err)
+	}
+	if evicted, err := result.RowsAffected(); err != nil || evicted == 0 {
+		return fmt.Errorf("%w: feedback limit reached", conversation.ErrLimit)
+	}
+	return nil
 }
 
 func (s *Store) DeleteFeedback(ctx context.Context, owner conversation.Owner, conversationID string, turnID string) error {

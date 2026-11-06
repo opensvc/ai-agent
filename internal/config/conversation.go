@@ -17,10 +17,12 @@ type ConversationConfig struct {
 	Lifetime          time.Duration
 	FeedbackRetention time.Duration
 	// The limits of the store, zero for its defaults: the conversations of
-	// the instance, those of one user, and the size of the database.
+	// the instance, those of one user, the size of the database, and the
+	// share of it one user stores.
 	MaxConversations     int
 	MaxUserConversations int
 	MaxDatabaseBytes     int64
+	MaxUserBytes         int64
 }
 
 func LoadConversation() (ConversationConfig, error) {
@@ -65,9 +67,16 @@ func loadConversation(getenv func(string) string) (ConversationConfig, error) {
 	if err != nil {
 		return ConversationConfig{}, err
 	}
+	// One user stores one conversation of the largest size at least; the
+	// store refuses a share larger than the database when it opens.
+	maxUserMiB, err := conversationLimit(getenv, "OPENSVC_AI_CONVERSATION_MAX_USER_MIB", 32, 1<<20)
+	if err != nil {
+		return ConversationConfig{}, err
+	}
 	return ConversationConfig{
 		DatabasePath: databasePath, Lifetime: lifetime, FeedbackRetention: retention,
 		MaxConversations: maxConversations, MaxUserConversations: maxUserConversations, MaxDatabaseBytes: int64(maxDatabaseMiB) << 20,
+		MaxUserBytes: int64(maxUserMiB) << 20,
 	}, nil
 }
 

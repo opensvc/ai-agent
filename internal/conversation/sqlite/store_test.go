@@ -565,3 +565,60 @@ func TestStoreConfigBoundsTheQuotaByTheLimit(t *testing.T) {
 		t.Fatal("a quota over the limit was accepted")
 	}
 }
+
+// TestStoreGivesEachUserAShareOfTheBytes refuses the turns of a user past
+// their share of the stored bytes, issuer and subject on every backend: at
+// completion when the turn would pass it, at its start once it is reached,
+// before the model is called. Another user's turns still complete.
+func TestStoreGivesEachUserAShareOfTheBytes(t *testing.T) {
+	turn := []llm.Message{
+		{Role: llm.RoleUser, Text: strings.Repeat("x", 50)},
+		{Role: llm.RoleAssistant, Text: strings.Repeat("y", 50)},
+	}
+	_, size, err := encodeMessages(turn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bob := conversation.Owner{Backend: "oc3", Issuer: "other-issuer", Subject: "bob"}
+	open := func(t *testing.T, userBytes int64) *Store {
+		store, _ := openTestStore(t, Config{MaxConversationBytes: 4 * size, MaxDatabaseBytes: 8 * size, MaxUserBytes: userBytes})
+		for _, item := range []conversation.Conversation{testConversation("alice-1", testOwner, testNow), testConversation("bob-1", bob, testNow)} {
+			if err := store.CreateConversation(t.Context(), item); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return store
+	}
+	t.Run("at completion", func(t *testing.T) {
+		store := open(t, 2*size-1)
+		completeOwnerTurn(t, store, testOwner, "alice-1", "a-1", testNow, turn)
+		if _, err := store.BeginTurn(t.Context(), testOwner, "alice-1", "a-2", testNow.Add(time.Minute)); err != nil {
+			t.Fatal(err)
+		}
+		err := store.CompleteTurn(t.Context(), testOwner, "alice-1", "a-2", testNow.Add(2*time.Minute), testNow.Add(time.Hour), turn, conversation.TurnRun{}, conversation.TurnTiming{})
+		if !errors.Is(err, conversation.ErrUserLimit) {
+			t.Fatalf("alice past her share = %v", err)
+		}
+		completeOwnerTurn(t, store, bob, "bob-1", "b-1", testNow, turn)
+	})
+	t.Run("at start", func(t *testing.T) {
+		store := open(t, size)
+		completeOwnerTurn(t, store, testOwner, "alice-1", "a-1", testNow, turn)
+		if _, err := store.BeginTurn(t.Context(), testOwner, "alice-1", "a-2", testNow.Add(time.Minute)); !errors.Is(err, conversation.ErrUserLimit) {
+			t.Fatalf("alice at her share = %v", err)
+		}
+		completeOwnerTurn(t, store, bob, "bob-1", "b-1", testNow, turn)
+	})
+	t.Run("configuration", func(t *testing.T) {
+		if _, err := validateConfig(Config{Path: "x", MaxDatabaseBytes: 100, MaxConversationBytes: 10, MaxUserBytes: 101}); err == nil {
+			t.Error("a user share above the database accepted")
+		}
+		if _, err := validateConfig(Config{Path: "x", MaxFeedback: 10, MaxUserFeedback: 11}); err == nil {
+			t.Error("a user feedback share above the feedback limit accepted")
+		}
+		config, err := validateConfig(Config{Path: "x"})
+		if err != nil || config.MaxUserBytes != DefaultMaxConversationBytes || config.MaxUserFeedback != DefaultMaxFeedback/defaultUserFeedbackShare {
+			t.Errorf("defaults %+v, %v", config, err)
+		}
+	})
+}

@@ -128,7 +128,7 @@
             }
           },
           "409": {
-            "description": "The caller reached the conversation quota of a user, or the instance its conversation limit. Codes: `conversation_quota`, `conversation_limit`.",
+            "description": "The caller reached the conversation quota of a user, their share of the stored bytes, or the instance its conversation limit. Codes: `conversation_quota`, `conversation_limit`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -635,7 +635,7 @@
             }
           },
           "409": {
-            "description": "The feedback limit of the agent has been reached. Codes: `feedback_limit`.",
+            "description": "The caller reached their feedback quota, or the instance its feedback limit. Codes: `feedback_quota`, `feedback_limit`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -763,7 +763,7 @@
               "text/event-stream": {
                 "schema": {
                   "type": "string",
-                  "description": "Server-sent events of the AG-UI protocol: each event is written as `data: <event JSON>`, followed by an empty line, without an event name. The run starts with RUN_STARTED and ends with RUN_FINISHED, whose outcome is success or an interrupt for a confirmation, or RUN_ERROR. A RUN_ERROR carries a code: `request_timeout`, `tool_name_conflict`, or `agent_failed`."
+                  "description": "Server-sent events of the AG-UI protocol: each event is written as `data: <event JSON>`, followed by an empty line, without an event name. The run starts with RUN_STARTED and ends with RUN_FINISHED, whose outcome is success or an interrupt for a confirmation, or RUN_ERROR. A RUN_ERROR carries a code: `request_timeout`, `tool_name_conflict`, `conversation_quota` or `conversation_limit` when the turn could not be stored, or `agent_failed`."
                 }
               }
             }
@@ -1048,7 +1048,7 @@
         }
       },
       "TooManyRequests": {
-        "description": "Too many agent turns are already running. Code: `too_many_requests`.",
+        "description": "Too many agent turns are already running: on the instance, code `too_many_requests`, or of the caller, as many as a user may run at once, code `too_many_user_requests`.",
         "headers": {
           "Retry-After": {
             "schema": {

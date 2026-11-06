@@ -154,7 +154,8 @@ func TestFeedbackLimits(t *testing.T) {
 	if _, err := store.PutFeedback(t.Context(), testOwner, item.ID, testFeedback("f1", "turn-1", up, testNow)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.PutFeedback(t.Context(), testOwner, item.ID, testFeedback("f2", "turn-2", up, testNow)); !errors.Is(err, conversation.ErrLimit) {
+	// One user alone reaches their share first, here the whole limit.
+	if _, err := store.PutFeedback(t.Context(), testOwner, item.ID, testFeedback("f2", "turn-2", up, testNow)); !errors.Is(err, conversation.ErrUserLimit) {
 		t.Fatalf("over the limit = %v", err)
 	}
 	// Replacing a feedback is never refused by the limit.
@@ -306,4 +307,84 @@ func TestTurnRunsCountTheShownToolsLeftOut(t *testing.T) {
 	if err := json.Unmarshal(data, &runs); err != nil || len(runs[0].ShownTools) != maxRunShownTools || runs[0].ShownToolsOmitted != 5 {
 		t.Fatalf("runs = %d shown, %d omitted, %v", len(runs[0].ShownTools), runs[0].ShownToolsOmitted, err)
 	}
+}
+
+// completeOwnerTurn stores a completed turn of owner in the conversation id.
+func completeOwnerTurn(t *testing.T, store *Store, owner conversation.Owner, id, turnID string, at time.Time, messages []llm.Message) {
+	t.Helper()
+	if _, err := store.BeginTurn(t.Context(), owner, id, turnID, at); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CompleteTurn(t.Context(), owner, id, turnID, at.Add(time.Second), at.Add(time.Hour), messages, conversation.TurnRun{}, conversation.TurnTiming{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestFeedbackIsSharedBetweenUsers gives each user a share of the feedback:
+// one user at their share does not block another; and the feedback of a
+// conversation its owner deleted, which nobody can withdraw any more, makes
+// room for another user's when the instance is full, rather than refuse it
+// for the retention.
+func TestFeedbackIsSharedBetweenUsers(t *testing.T) {
+	bob := conversation.Owner{Backend: "oc3", Issuer: "other-issuer", Subject: "bob"}
+	up := conversation.Feedback{Rating: "up"}
+	t.Run("share", func(t *testing.T) {
+		store, _ := openTestStore(t, Config{MaxFeedback: 4, MaxUserFeedback: 1})
+		alice := testConversation("alice-1", testOwner, testNow)
+		bobs := testConversation("bob-1", bob, testNow)
+		for _, item := range []conversation.Conversation{alice, bobs} {
+			if err := store.CreateConversation(t.Context(), item); err != nil {
+				t.Fatal(err)
+			}
+		}
+		completeOwnerTurn(t, store, testOwner, alice.ID, "a-1", testNow, toolTranscript())
+		completeOwnerTurn(t, store, testOwner, alice.ID, "a-2", testNow.Add(time.Minute), toolTranscript())
+		completeOwnerTurn(t, store, bob, bobs.ID, "b-1", testNow, toolTranscript())
+		if _, err := store.PutFeedback(t.Context(), testOwner, alice.ID, testFeedback("f1", "a-1", up, testNow)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.PutFeedback(t.Context(), testOwner, alice.ID, testFeedback("f2", "a-2", up, testNow)); !errors.Is(err, conversation.ErrUserLimit) {
+			t.Fatalf("alice over her share = %v", err)
+		}
+		if _, err := store.PutFeedback(t.Context(), bob, bobs.ID, testFeedback("f3", "b-1", up, testNow)); err != nil {
+			t.Fatalf("bob = %v", err)
+		}
+	})
+	t.Run("full instance", func(t *testing.T) {
+		store, _ := openTestStore(t, Config{MaxFeedback: 2, MaxUserFeedback: 2})
+		alice := testConversation("alice-1", testOwner, testNow)
+		bobs := testConversation("bob-1", bob, testNow)
+		for _, item := range []conversation.Conversation{alice, bobs} {
+			if err := store.CreateConversation(t.Context(), item); err != nil {
+				t.Fatal(err)
+			}
+		}
+		completeOwnerTurn(t, store, testOwner, alice.ID, "a-1", testNow, toolTranscript())
+		completeOwnerTurn(t, store, testOwner, alice.ID, "a-2", testNow.Add(time.Minute), toolTranscript())
+		completeOwnerTurn(t, store, bob, bobs.ID, "b-1", testNow, toolTranscript())
+		for _, f := range []struct{ id, turn string }{{"f1", "a-1"}, {"f2", "a-2"}} {
+			if _, err := store.PutFeedback(t.Context(), testOwner, alice.ID, testFeedback(f.id, f.turn, up, testNow)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// Full of feedback alice can still withdraw: bob is refused.
+		if _, err := store.PutFeedback(t.Context(), bob, bobs.ID, testFeedback("f3", "b-1", up, testNow)); !errors.Is(err, conversation.ErrLimit) {
+			t.Fatalf("bob on a full instance = %v", err)
+		}
+		// Alice deletes the conversation she rated: her feedback stays,
+		// anonymous, and the oldest goes for bob's.
+		if err := store.DeleteConversation(t.Context(), testOwner, alice.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.PutFeedback(t.Context(), bob, bobs.ID, testFeedback("f3", "b-1", up, testNow)); err != nil {
+			t.Fatalf("bob after alice deleted = %v", err)
+		}
+		var total, anonymous int
+		if err := store.db.QueryRowContext(t.Context(), "SELECT COUNT(*), COALESCE(SUM(CASE WHEN turn_id IS NULL THEN 1 ELSE 0 END), 0) FROM feedback").Scan(&total, &anonymous); err != nil {
+			t.Fatal(err)
+		}
+		if total != 2 || anonymous != 1 {
+			t.Fatalf("feedback rows %d, anonymous %d", total, anonymous)
+		}
+	})
 }

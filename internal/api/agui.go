@@ -82,15 +82,16 @@ func serveConversationRun(service ConversationService, limiter *askLimiter, audi
 			return
 		}
 		attributes = append(attributes, slog.String("run_id", boundedAuditID(input.RunID)), slog.String("protocol_version", boundedAuditID(input.ProtocolVersion)))
-		if !acquireAgentSlot(response, request, limiter, audit, "conversation_run", attributes) {
-			return
-		}
-		defer limiter.release()
 		identity, ok := auth.IdentityFromContext(request.Context())
 		if !ok {
 			writeUnauthorized(response)
 			return
 		}
+		key := userKey(identity.Issuer, identity.Subject)
+		if !acquireAgentSlot(response, request, limiter, key, audit, "conversation_run", attributes) {
+			return
+		}
+		defer limiter.release(key)
 		codec := &aguiCodec{encoder: agui.NewEncoder(input.ThreadID, input.RunID)}
 		// The tools of the client are offered to the model in the turn the
 		// run runs or resumes.

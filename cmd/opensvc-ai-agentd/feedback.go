@@ -51,6 +51,7 @@ func runFeedback(args []string, output io.Writer) error {
 		MaxConversations:     conversationConfig.MaxConversations,
 		MaxUserConversations: conversationConfig.MaxUserConversations,
 		MaxDatabaseBytes:     conversationConfig.MaxDatabaseBytes,
+		MaxUserBytes:         conversationConfig.MaxUserBytes,
 	})
 	if err != nil {
 		return fmt.Errorf("open conversation store: %w", err)

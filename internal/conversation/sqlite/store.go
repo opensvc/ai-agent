@@ -22,6 +22,11 @@ const (
 	DefaultMaxMessages          = 256
 	DefaultMaxConversationBytes = 32 << 20
 	DefaultMaxDatabaseBytes     = 256 << 20
+	// defaultUserBytesShare and defaultUserFeedbackShare are the parts of
+	// the database bytes and of the feedback one user may hold by default:
+	// a full instance needs that many users.
+	defaultUserBytesShare    = 8
+	defaultUserFeedbackShare = 8
 )
 
 type Config struct {
@@ -32,7 +37,16 @@ type Config struct {
 	MaxMessages          int
 	MaxConversationBytes int64
 	MaxDatabaseBytes     int64
-	MaxFeedback          int
+	// MaxUserBytes bounds the bytes the conversations of one user store,
+	// its issuer and subject, every backend and cluster together, so that
+	// one user does not fill the database for the others; 0 for a share of
+	// MaxDatabaseBytes, defaultUserBytesShare, at least MaxConversationBytes.
+	MaxUserBytes int64
+	MaxFeedback  int
+	// MaxUserFeedback bounds the feedback one user stores on the turns of
+	// their conversations; 0 for a share of MaxFeedback,
+	// defaultUserFeedbackShare.
+	MaxUserFeedback int
 }
 
 type Store struct {
@@ -126,7 +140,13 @@ func validateConfig(config Config) (Config, error) {
 	if config.MaxFeedback == 0 {
 		config.MaxFeedback = DefaultMaxFeedback
 	}
-	if config.MaxConversations < 1 || config.MaxUserConversations < 1 || config.MaxTurns < 1 || config.MaxMessages < 1 || config.MaxConversationBytes < 1 || config.MaxDatabaseBytes < 1 || config.MaxFeedback < 1 {
+	if config.MaxUserBytes == 0 {
+		config.MaxUserBytes = min(max(config.MaxDatabaseBytes/defaultUserBytesShare, config.MaxConversationBytes), config.MaxDatabaseBytes)
+	}
+	if config.MaxUserFeedback == 0 {
+		config.MaxUserFeedback = max(config.MaxFeedback/defaultUserFeedbackShare, 1)
+	}
+	if config.MaxConversations < 1 || config.MaxUserConversations < 1 || config.MaxTurns < 1 || config.MaxMessages < 1 || config.MaxConversationBytes < 1 || config.MaxDatabaseBytes < 1 || config.MaxFeedback < 1 || config.MaxUserBytes < 1 || config.MaxUserFeedback < 1 {
 		return Config{}, fmt.Errorf("conversation SQLite limits must be positive")
 	}
 	if config.MaxUserConversations > config.MaxConversations {
@@ -134,6 +154,12 @@ func validateConfig(config Config) (Config, error) {
 	}
 	if config.MaxConversationBytes > config.MaxDatabaseBytes {
 		return Config{}, fmt.Errorf("conversation SQLite per-conversation byte limit exceeds database byte limit")
+	}
+	if config.MaxUserBytes > config.MaxDatabaseBytes {
+		return Config{}, fmt.Errorf("conversation SQLite per-user byte limit exceeds database byte limit")
+	}
+	if config.MaxUserFeedback > config.MaxFeedback {
+		return Config{}, fmt.Errorf("conversation SQLite per-user feedback limit exceeds the feedback limit")
 	}
 	return config, nil
 }
