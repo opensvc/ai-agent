@@ -44,8 +44,8 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      # Pinned: v0.7.0 is the latest release that builds with the Go version
-      # of go.mod (1.25); later releases require Go 1.26.
+      # Pinned: a release of staticcheck changes what it reports. v0.7.0
+      # still checks the language of the go line of go.mod (1.25).
       - name: Staticcheck
         run: go run honnef.co/go/tools/cmd/staticcheck@v0.7.0 ./...
 
@@ -55,8 +55,10 @@ jobs:
       - name: Test
         run: go test -race -count=1 ./...
 
-  # The known vulnerabilities the code reaches, with the Go of the image
-  # (Dockerfile), whose standard library the binary carries.
+  # The known vulnerabilities the code reaches, with the toolchain of go.mod,
+  # the Go of the image, whose standard library the binary carries. A new
+  # advisory fails it without any commit: the answer is a newer Go, in the
+  # toolchain line of go.mod and in the Dockerfile.
   vulncheck:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -67,7 +69,7 @@ jobs:
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
-          go-version: '1.26.10'
+          go-version-file: go.mod
 
       - name: Govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...

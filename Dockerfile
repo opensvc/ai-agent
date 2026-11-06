@@ -2,9 +2,10 @@
 # opensvc-ai, uid 995 and gid 983, the IDs the files and the sockets of the
 # service are given, the same on every node.
 # The base images are pinned by digest: a tag moved in the registry does not
-# change a release. The Go of the build is newer than the one of go.mod: the
-# standard library of the binary takes its fixes, Go 1.25 getting no more of
-# them; the vulncheck job of CI checks with the same version.
+# change a release. The Go of the build is the toolchain line of go.mod, which
+# CI tests and checks for vulnerabilities with: change both together. It is
+# newer than the go line, the language version, for the fixes of the standard
+# library the binary carries, Go 1.25 getting no more of them.
 FROM golang:1.26.10@sha256:cfa27959837144bf4649802ba38e59daffd0dd2a7994aa83daaf113285b0f551 AS builder
 
 # VERSION is the version of the binary, from git describe; the git directory
