@@ -223,6 +223,11 @@ authentication headers of the backend:
   with the edited arguments; see [Previews](#previews). Any other member of
   the payload, or `editedArgs` with a rejection, returns 400
   `invalid_decision`. The messages of a resume are not read.
+  A decision applies to the call the confirmation showed, and to its tool as
+  the MCP listed it then: when the MCP no longer offers that tool, or changed
+  its definition since (description, annotations, schemas, metadata), the
+  resumed run ends with `RUN_ERROR` `agent_failed` and nothing runs; no later
+  call of the answer takes the decision. The user asks again.
 
 Errors before the stream are JSON errors, `{"error": {"code", "message"}}`,
 the codes the OpenAPI description lists. The stream is `text/event-stream`,

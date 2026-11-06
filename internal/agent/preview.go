@@ -59,7 +59,8 @@ func preview(ctx context.Context, session MCPSession, tools map[string]*mcp.Tool
 	if !ok || name == "" {
 		return nil, ""
 	}
-	if target, ok := tools[name]; !ok || !target.Annotations.ReadOnlyHint {
+	// A tool listed without annotations is not read-only.
+	if target, ok := tools[name]; !ok || target.Annotations == nil || !target.Annotations.ReadOnlyHint {
 		return nil, fmt.Sprintf("the preview tool %s is not a read-only tool of the server", name)
 	}
 	var input map[string]any
