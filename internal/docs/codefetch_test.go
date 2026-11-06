@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/iotest"
 )
 
 func TestCodeRefOfAVersion(t *testing.T) {
@@ -130,5 +131,35 @@ func TestBoundedReaderStopsPastItsLimit(t *testing.T) {
 	}
 	if err := read("abcde"); err == nil || !strings.Contains(err.Error(), "more than 4 bytes") {
 		t.Errorf("5 bytes: %v", err)
+	}
+	// A failure right at the limit, such as a corrupt stream, is not the end.
+	broken := io.MultiReader(strings.NewReader("abcd"), iotest.ErrReader(errors.New("corrupt")))
+	if _, err := io.ReadAll(&boundedReader{r: broken, left: 4, limit: 4}); err == nil || err.Error() != "corrupt" {
+		t.Errorf("a failure at the limit: %v", err)
+	}
+}
+
+// TestFetchCodeBoundsNamesAndTheUnzippedArchive leaves out a file of too long
+// a path, and refuses an archive whose entry names, or whose unzipped size,
+// files left out included, pass their bounds: a small archive must not make
+// the agent read or keep far more than it holds.
+func TestFetchCodeBoundsNamesAndTheUnzippedArchive(t *testing.T) {
+	long := "om3/" + strings.Repeat("d/", maxPathBytes/2) + "long.go"
+	server := codeServer(t, map[string][]byte{
+		"/om3/long":  archiveOf(t, entry{name: long, text: "package d\n"}, entry{name: "om3/ok.go", text: "package ok\n"}),
+		"/om3/names": archiveOf(t, entry{name: "om3/" + strings.Repeat("n", 200) + ".md", text: "x"}, entry{name: "om3/" + strings.Repeat("m", 200) + ".md", text: "x"}),
+		"/om3/large": archiveOf(t, entry{name: "om3/README.md", text: strings.Repeat("x", 8192)}, entry{name: "om3/ok.go", text: "package ok\n"}),
+	})
+	files, err := FetchCode(context.Background(), server.Client(), server.URL+"/om3/{ref}", "long")
+	if err != nil || len(files) != 1 || files[0].Path != "ok.go" {
+		t.Errorf("a long path: %+v, %v", files, err)
+	}
+	defer func(limits archiveLimits) { codeArchiveLimits = limits }(codeArchiveLimits)
+	codeArchiveLimits = archiveLimits{names: 300, unzipped: 4096}
+	if _, err := FetchCode(context.Background(), server.Client(), server.URL+"/om3/{ref}", "names"); err == nil || !strings.Contains(err.Error(), "more than 300 bytes of entry names") {
+		t.Errorf("long names: %v", err)
+	}
+	if _, err := FetchCode(context.Background(), server.Client(), server.URL+"/om3/{ref}", "large"); err == nil || !strings.Contains(err.Error(), "unzipped archive of more than 4096 bytes") {
+		t.Errorf("a large file left out: %v", err)
 	}
 }

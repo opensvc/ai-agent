@@ -2,6 +2,7 @@ package docs
 
 import (
 	"archive/tar"
+	"cmp"
 	"compress/gzip"
 	"context"
 	"errors"
@@ -21,10 +22,26 @@ const (
 	maxArchiveBytes    = 32 << 20
 	maxArchiveFiles    = 8000
 	maxSourceFileBytes = 2 << 20
-	// maxSourceBytes bounds the Go source read from an archive in all, om3
-	// holding some 10 MB of it.
+	// maxSourceBytes bounds the Go source read from an archive in all, its
+	// paths included, om3 holding some 10 MB of it.
 	maxSourceBytes = 64 << 20
+	// maxPathBytes bounds the path of a file kept, those of om3 being under
+	// 200 bytes; a longer one is left out.
+	maxPathBytes = 1024
 )
+
+// archiveLimits bound the reading of an archive besides its compressed size:
+// the names of its entries in all, kept or not, which the tar reader decodes
+// before they are filtered, up to 1 MiB each; and the archive unzipped, its
+// files left out included, which are read through to the next entry.
+type archiveLimits struct {
+	names    int
+	unzipped int64
+}
+
+// codeArchiveLimits are the limits of a code archive; om3 main unzips to
+// 21 MB, with 164 KB of names and paths of 74 bytes at most (2026-11).
+var codeArchiveLimits = archiveLimits{names: 8 << 20, unzipped: 256 << 20}
 
 var (
 	// describeVersion is the version git describe gives a build past a
@@ -96,15 +113,17 @@ func FetchCode(ctx context.Context, client *http.Client, template, ref string) (
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("read %s: %s", link, response.Status)
 	}
-	body := &boundedReader{r: response.Body, left: maxArchiveBytes, limit: maxArchiveBytes}
+	limits := codeArchiveLimits
+	body := &boundedReader{r: response.Body, left: maxArchiveBytes, limit: maxArchiveBytes, what: "archive"}
 	unzipped, err := gzip.NewReader(body)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", link, err)
 	}
-	archive := tar.NewReader(unzipped)
+	archive := tar.NewReader(&boundedReader{r: unzipped, left: limits.unzipped, limit: limits.unzipped, what: "unzipped archive"})
 	var (
 		files   []File
 		entries int
+		names   int
 		total   int
 	)
 	for {
@@ -118,6 +137,9 @@ func FetchCode(ctx context.Context, client *http.Client, template, ref string) (
 		if entries++; entries > maxArchiveFiles {
 			return nil, fmt.Errorf("read %s: more than %d entries", link, maxArchiveFiles)
 		}
+		if names += len(header.Name) + len(header.Linkname); names > limits.names {
+			return nil, fmt.Errorf("read %s: more than %d bytes of entry names", link, limits.names)
+		}
 		if header.Typeflag != tar.TypeReg {
 			continue
 		}
@@ -125,7 +147,7 @@ func FetchCode(ctx context.Context, client *http.Client, template, ref string) (
 		// om3-451250d44.../: the paths of the files are under it.
 		name := path.Clean(header.Name)
 		_, rel, ok := strings.Cut(name, "/")
-		if !ok || strings.HasPrefix(rel, "../") || path.IsAbs(rel) || !strings.HasSuffix(rel, ".go") || strings.HasSuffix(rel, "_test.go") {
+		if !ok || len(rel) > maxPathBytes || strings.HasPrefix(rel, "../") || path.IsAbs(rel) || !strings.HasSuffix(rel, ".go") || strings.HasSuffix(rel, "_test.go") {
 			continue
 		}
 		if header.Size > maxSourceFileBytes {
@@ -138,7 +160,8 @@ func FetchCode(ctx context.Context, client *http.Client, template, ref string) (
 		if len(data) > maxSourceFileBytes {
 			continue
 		}
-		if total += len(data); total > maxSourceBytes {
+		// The path is kept with the text: it counts.
+		if total += len(rel) + len(data); total > maxSourceBytes {
 			return nil, fmt.Errorf("read %s: more than %d bytes of Go source", link, maxSourceBytes)
 		}
 		files = append(files, File{Path: rel, Text: string(data)})
@@ -149,11 +172,13 @@ func FetchCode(ctx context.Context, client *http.Client, template, ref string) (
 	return files, nil
 }
 
-// boundedReader fails past limit bytes, rather than reading on.
+// boundedReader fails past limit bytes of what it reads, rather than
+// reading on.
 type boundedReader struct {
 	r     io.Reader
 	left  int64
 	limit int64
+	what  string
 }
 
 func (b *boundedReader) Read(p []byte) (int, error) {
@@ -161,10 +186,15 @@ func (b *boundedReader) Read(p []byte) (int, error) {
 		// One byte more tells an archive of exactly limit bytes, which is
 		// read, from a longer one.
 		var probe [1]byte
-		if n, _ := b.r.Read(probe[:]); n == 0 {
+		n, err := b.r.Read(probe[:])
+		if n == 0 {
+			// An error at the limit is told, not taken for the end.
+			if err != nil && err != io.EOF {
+				return 0, err
+			}
 			return 0, io.EOF
 		}
-		return 0, fmt.Errorf("archive of more than %d bytes", b.limit)
+		return 0, fmt.Errorf("%s of more than %d bytes", cmp.Or(b.what, "archive"), b.limit)
 	}
 	if int64(len(p)) > b.left {
 		p = p[:b.left]
