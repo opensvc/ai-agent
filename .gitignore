@@ -24,8 +24,11 @@ profile.cov
 go.work
 go.work.sum
 
-# env file
+# env files, keys and certificates, which the image leaves out too
 .env
+.env.*
+*.key
+*.pem
 
 # Editor/IDE
 # .idea/
