@@ -274,6 +274,29 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 	executeCalls := func() (bool, error) {
 		for len(state.Results) < len(state.Calls) {
 			call := state.Calls[len(state.Results)]
+			// The decision of the user applies to the call they were shown,
+			// the first left to run, and to no other. When its tool is no
+			// longer offered, such as after a change of the catalog of the
+			// MCP since the turn waited, the turn fails rather than answer the
+			// call as unoffered: a later call of the answer, never shown,
+			// would otherwise take the approval, or the arguments the user
+			// wrote for another tool.
+			callDecision := decision
+			decision = ""
+			if callDecision != "" {
+				tool, offered := toolsByName[call.Name]
+				if !offered {
+					state.EditedArguments = nil
+					return false, fmt.Errorf("the confirmed tool %q is no longer offered: the decision cannot apply", call.Name)
+				}
+				// The decision was taken on the definition the user saw:
+				// a tool the server changed since, its annotations, schema
+				// or preview, takes a new confirmation.
+				if sum, err := toolCatalogHash([]*mcp.Tool{tool}); err != nil || sum != state.ToolSHA256 {
+					state.EditedArguments = nil
+					return false, fmt.Errorf("the confirmed tool %q changed since its confirmation: the decision cannot apply", call.Name)
+				}
+			}
 			// A call of a tool of the client is answered by the client.
 			if slices.Contains(state.ClientCalls, call.ID) {
 				answer, ok := state.clientResult(call.ID)
@@ -396,14 +419,15 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 			if err != nil {
 				return false, err
 			}
-			callDecision := decision
-			decision = ""
 			if callDecision == DecisionReject {
 				state.Results = append(state.Results, llm.ToolResult{CallID: call.ID, Content: rejectedToolResult, IsError: true})
 				continue
 			}
 			if callDecision != DecisionApprove && requiresConfirmation(tool) {
 				state.ToolTitle, state.ArgumentTypes, state.InputSchema = toolTitle(tool), argumentTypes(tool), editableSchema(tool)
+				if state.ToolSHA256, err = toolCatalogHash([]*mcp.Tool{tool}); err != nil {
+					return false, err
+				}
 				state.Preview, state.PreviewError = preview(ctx, session, allTools, tool, call.Arguments)
 				state.PreviewArguments = nil
 				return true, nil
@@ -474,7 +498,7 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 			messages = append(messages, assistantMessage, toolMessage)
 			state.Messages = append(state.Messages, assistantMessage, toolMessage)
 			state.Calls, state.Results, state.Text, state.ToolTitle, state.ArgumentTypes = nil, nil, "", "", nil
-			state.InputSchema, state.EditedArguments = nil, nil
+			state.InputSchema, state.EditedArguments, state.ToolSHA256 = nil, nil, ""
 			state.ClientCalls, state.ClientResults = nil, nil
 		}
 		if state.Iteration >= a.config.MaxIterations {

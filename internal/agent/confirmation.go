@@ -123,6 +123,11 @@ type SuspendedTurn struct {
 	Preview          json.RawMessage `json:"preview,omitempty"`
 	PreviewError     string          `json:"preview_error,omitempty"`
 	PreviewArguments json.RawMessage `json:"preview_arguments,omitempty"`
+	// ToolSHA256 hashes the definition of the pending tool, as the server
+	// listed it when the confirmation was asked: name, title, description,
+	// schemas, annotations and metadata. A decision applies to that tool
+	// only, not to one the server changed since.
+	ToolSHA256 string `json:"tool_sha256,omitempty"`
 }
 
 // PendingCall returns the call waiting for confirmation.
