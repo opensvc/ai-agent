@@ -558,7 +558,9 @@ whose commit is read, else, when it is not published, its tag, the result
 saying the code is not exactly that version; a version with no published
 code is a tool error saying so.
 The archive is read from the configured host only, in memory, at most 32 MB,
-8000 entries and 2 MB a file, its Go files only, symbolic links left out; a
+256 MiB unzipped, 8000 entries, 8 MiB of entry names, 2 MB a file and 1 KiB
+a path, its Go files only, 64 MiB of them paths included, symbolic links left
+out; a
 file that does not parse, a generated file, marked `DO NOT EDIT`, and the
 tests are left out. Each declaration is indexed with its doc comment, the
 words of its identifiers searched, and a search gives, as `search_docs`
@@ -567,8 +569,12 @@ its declarations, up to 6 KiB, holding them, with its path and lines, 16 KiB
 in all. A search takes English keywords or Go identifiers, an optional
 `limit` and an optional `version`. The code of a version is read the first
 time a search asks for it, a failed read asked again 10 minutes later;
-three versions are kept, the latest code always among them, the least
-recently used other version leaving, never one still read. A question searches the code 6 times
+three versions are kept or being read, the latest code always among them,
+the least recently used other version leaving, never one still read: with
+the three places taken by reads, a search for a fourth version is a tool
+error telling the model to try again later. Two versions are read at once,
+the others waiting their turn; a read that no search waits on any more, its
+runs canceled, is stopped, and read again by the next search. A question searches the code 6 times
 at most, across the confirmations it waits on: a search past them is a tool
 error telling the model to answer with the code read.
 The name is the agent's: an MCP tool named `search_code` fails the turn.

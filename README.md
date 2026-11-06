@@ -99,7 +99,8 @@ latest code, at `OPENSVC_AI_CODE_REF`, `main` by default, read again every
 archive of a version is read the first time a search asks for it, in
 memory, and indexed by declaration, its tests and its generated code left
 out: about 50 MB kept per version, 100 MB while one is indexed, three
-versions kept, the latest code always among them. A question searches the
+versions kept or being read, the latest code always among them, two read at
+once. A question searches the
 code 6 times at most. A mirror serves the same archives at its own URL.
 
 For browser clients, set `OPENSVC_AI_CORS_ALLOWED_ORIGINS` to comma-separated

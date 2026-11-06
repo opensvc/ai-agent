@@ -21,6 +21,9 @@ const (
 	// is kept before it is read again; a tag or a commit is kept as long as
 	// it is used.
 	codeLatestLifetime = 6 * time.Hour
+	// maxCodeLoads bounds the reads of code at once, each downloading and
+	// indexing an archive: the others wait their turn.
+	maxCodeLoads = 2
 )
 
 // CodeShelf holds the code indexes of the versions of a program searched,
@@ -37,6 +40,9 @@ type CodeShelf struct {
 	logf   func(format string, args ...any)
 	now    func() time.Time
 
+	// loads holds a token per read of code in progress, maxCodeLoads.
+	loads chan struct{}
+
 	mu      sync.Mutex
 	entries map[string]*codeEntry
 	used    uint64
@@ -44,9 +50,13 @@ type CodeShelf struct {
 
 // codeEntry is the code of one version, read once: done closes when the read
 // ends. refreshing tells that the latest code, past its lifetime, is read
-// again, the entry served meanwhile.
+// again, the entry served meanwhile. waiters are the searches waiting on
+// the read, and cancel stops it: the last to leave stops a read nobody waits
+// on any more.
 type codeEntry struct {
 	done       chan struct{}
+	waiters    int
+	cancel     context.CancelFunc
 	index      *CodeIndex
 	note       string
 	err        error
@@ -63,7 +73,7 @@ func NewCodeShelf(client *http.Client, template, latest string, logf func(format
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
-	s := &CodeShelf{client: client, template: template, latest: latest, logf: logf, now: time.Now, entries: map[string]*codeEntry{}}
+	s := &CodeShelf{client: client, template: template, latest: latest, logf: logf, now: time.Now, entries: map[string]*codeEntry{}, loads: make(chan struct{}, maxCodeLoads)}
 	s.fetch = func(ctx context.Context, ref string) ([]File, error) {
 		return FetchCode(ctx, s.client, s.template, ref)
 	}
@@ -86,13 +96,18 @@ func (s *CodeShelf) Code(ctx context.Context, version string) (*CodeIndex, strin
 		}
 	}
 	entry := s.entry(version)
+	if entry == nil {
+		return nil, fmt.Sprintf("The code of %s cannot be read now: %d versions of the code are kept or being read, the most at once; search one of them, or the latest code, or try again in a few minutes.", label(version), maxCodeIndexes)
+	}
 	select {
 	case <-entry.done:
 	case <-ctx.Done():
-		return nil, fmt.Sprintf("The code of %s could not be read: %v.", version, ctx.Err())
+		s.leave(version, entry)
+		return nil, fmt.Sprintf("The code of %s could not be read: %v.", label(version), ctx.Err())
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	entry.waiters--
 	if entry.err != nil {
 		if version != "" && errors.Is(entry.err, errNotPublished) {
 			return nil, fmt.Sprintf("No code is published at %s: name a tag in full, such as v<major>.<minor>.<patch>-rc<n>, or a commit.", version)
@@ -105,19 +120,24 @@ func (s *CodeShelf) Code(ctx context.Context, version string) (*CodeIndex, strin
 	return entry.index, entry.note
 }
 
-// entry gives the entry of version, read in the background the first time,
-// and again after shelfRetry when it failed; the least recently used entry
-// leaves past maxCodeIndexes.
+// entry gives the entry of version, the caller counted among its waiters,
+// read in the background the first time, and again after shelfRetry when it
+// failed. A new read takes the place of the least recently used entry read,
+// never of one in progress, nor of the latest code, which any search naming
+// no version reads; nil when every place is taken: the reads in progress are
+// bounded with the indexes kept.
 func (s *CodeShelf) entry(version string) *codeEntry {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.used++
 	entry, ok := s.entries[version]
 	if ok && entry.err != nil && s.now().Sub(entry.at) >= shelfRetry {
+		delete(s.entries, version)
 		ok = false
 	}
 	if ok {
 		entry.used = s.used
+		entry.waiters++
 		// The latest code moves: past its lifetime it is read again, the
 		// searches served the code read before until the new read ends.
 		if version == "" && entry.ended() && entry.err == nil && !entry.refreshing && s.now().Sub(entry.at) >= codeLatestLifetime {
@@ -126,15 +146,10 @@ func (s *CodeShelf) entry(version string) *codeEntry {
 		}
 		return entry
 	}
-	entry = &codeEntry{done: make(chan struct{}), used: s.used}
-	s.entries[version] = entry
-	// The least recently used read leaves, never one still in progress, its
-	// searches waiting on it and its index staying in memory anyway, nor the
-	// latest code, which any search naming no version reads.
-	for len(s.entries) > maxCodeIndexes {
+	for len(s.entries) >= maxCodeIndexes {
 		oldest := ""
 		for v, e := range s.entries {
-			if v == version || v == "" || !e.ended() {
+			if v == "" || !e.ended() {
 				continue
 			}
 			if oldest == "" || e.used < s.entries[oldest].used {
@@ -142,12 +157,16 @@ func (s *CodeShelf) entry(version string) *codeEntry {
 			}
 		}
 		if oldest == "" {
-			break
+			return nil
 		}
 		delete(s.entries, oldest)
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), codeLoadTimeout)
+	entry = &codeEntry{done: make(chan struct{}), used: s.used, waiters: 1, cancel: cancel}
+	s.entries[version] = entry
 	go func() {
-		index, note, err := s.load(version)
+		defer cancel()
+		index, note, err := s.load(ctx, version)
 		s.mu.Lock()
 		entry.index, entry.note, entry.err, entry.at = index, note, err, s.now()
 		s.mu.Unlock()
@@ -156,17 +175,39 @@ func (s *CodeShelf) entry(version string) *codeEntry {
 	return entry
 }
 
-// load reads and indexes the code of version, within codeLoadTimeout.
-func (s *CodeShelf) load(version string) (*CodeIndex, string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), codeLoadTimeout)
-	defer cancel()
+// leave takes a search that stopped waiting out of the waiters of entry: the
+// last one stops the read, and the entry leaves the shelf, read again by the
+// next search that asks for it.
+func (s *CodeShelf) leave(version string, entry *codeEntry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if entry.waiters--; entry.waiters > 0 || entry.ended() {
+		return
+	}
+	entry.cancel()
+	if s.entries[version] == entry {
+		delete(s.entries, version)
+	}
+}
+
+// load reads and indexes the code of version once a place among the
+// maxCodeLoads reads at once is free, within ctx.
+func (s *CodeShelf) load(ctx context.Context, version string) (*CodeIndex, string, error) {
+	select {
+	case s.loads <- struct{}{}:
+		defer func() { <-s.loads }()
+	case <-ctx.Done():
+		return nil, "", ctx.Err()
+	}
 	return s.read(ctx, version)
 }
 
 // refresh reads the latest code again, then puts it in place of old; a read
 // that fails keeps old, read again after shelfRetry.
 func (s *CodeShelf) refresh(old *codeEntry) {
-	index, note, err := s.load("")
+	ctx, cancel := context.WithTimeout(context.Background(), codeLoadTimeout)
+	defer cancel()
+	index, note, err := s.load(ctx, "")
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	old.refreshing = false
