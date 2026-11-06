@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"maps"
 	"slices"
 	"strings"
@@ -597,7 +598,9 @@ func (t *PreparedTurn) Run(ctx context.Context, emit agent.EmitFunc) error {
 	// already ended stays as it ended.
 	defer func() {
 		if r := recover(); r != nil {
-			_ = t.service.failTurn(t.owner, t.conversationID, t.turnID, TurnFailed, "agent_panicked")
+			if err := t.service.failTurn(t.owner, t.conversationID, t.turnID, TurnFailed, "agent_panicked"); err != nil && !errors.Is(err, ErrConflict) {
+				log.Printf("record the failure of a turn whose run panicked, conversation %s, turn %s: %v", t.conversationID, t.turnID, err)
+			}
 			panic(r)
 		}
 	}()

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"log/slog"
 	"mime"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 	"github.com/opensvc/ai-agent/internal/buildinfo"
 	"github.com/opensvc/ai-agent/internal/conversation"
 	"github.com/opensvc/ai-agent/internal/llm"
+	"github.com/opensvc/ai-agent/internal/requestid"
 )
 
 const (
@@ -305,7 +307,12 @@ func serveConversationRun(backend string, service ConversationService, limiter *
 		if !started {
 			code = "streaming_unavailable"
 		}
-		_ = execution.Cancel(code)
+		if err := execution.Cancel(code); err != nil && !errors.Is(err, conversation.ErrConflict) {
+			// The turn may stay running: the cause in the server log,
+			// the audit keeping the code only.
+			log.Printf("cancel the turn of a run that did not start, request %s: %v", requestid.FromContext(request.Context()), err)
+			audit.event(request.Context(), "conversation_run_cancel_failed", appendAttributes(attributes, slog.String("code", code))...)
+		}
 	}
 }
 

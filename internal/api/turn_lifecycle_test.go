@@ -1,14 +1,18 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/opensvc/ai-agent/internal/agent"
@@ -98,5 +102,49 @@ func TestAFailedOpeningLeavesNoTurnRunning(t *testing.T) {
 	handler.ServeHTTP(deleted, requestWithToken(http.MethodDelete, "/v1/om3/conversations/"+id, "alice", ""))
 	if deleted.Code != http.StatusNoContent {
 		t.Fatalf("delete: %d %s", deleted.Code, deleted.Body.String())
+	}
+}
+
+// cancelFailing prepares turns whose cancellation fails with err.
+type cancelFailing struct {
+	noopConversationService
+	err error
+}
+
+func (s cancelFailing) PrepareTurn(context.Context, auth.Identity, string, string) (conversation.TurnExecution, error) {
+	return cancelFailingExecution{testTurnExecution: &testTurnExecution{run: func(context.Context, agent.EmitFunc) error { return nil }}, err: s.err}, nil
+}
+
+type cancelFailingExecution struct {
+	*testTurnExecution
+	err error
+}
+
+func (e cancelFailingExecution) Cancel(string) error { return e.err }
+
+// TestAFailedCancellationIsAudited audits a turn that may stay running, its
+// cancellation failing as with the database closed, and not the conflict of
+// a turn the run already took.
+func TestAFailedCancellationIsAudited(t *testing.T) {
+	for name, test := range map[string]struct {
+		err     error
+		audited bool
+	}{
+		"database closed": {errors.New("database closed"), true},
+		"already taken":   {fmt.Errorf("%w: conversation turn already consumed", conversation.ErrConflict), false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var audit bytes.Buffer
+			handler, err := NewHandler([]Backend{{Name: "om3", Conversations: cancelFailing{err: test.err}, Authenticator: allowTestTokenVerifier()}},
+				HandlerConfig{MaxConcurrentAsks: 2, AuditLogger: slog.New(slog.NewTextHandler(&audit, nil))})
+			if err != nil {
+				t.Fatal(err)
+			}
+			handler.ServeHTTP(failingWriter{httptest.NewRecorder()}, newAuthenticatedRunRequest(runBody("hello")))
+			logged := strings.Contains(audit.String(), "conversation_run_cancel_failed") && strings.Contains(audit.String(), "code=stream_not_started")
+			if logged != test.audited || strings.Contains(audit.String(), "database closed") {
+				t.Fatalf("audited %v, want %v: %s", logged, test.audited, audit.String())
+			}
+		})
 	}
 }
