@@ -1,6 +1,7 @@
 package api
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -501,8 +502,11 @@ func TestRunGivesEachUserAShareOfTheSlots(t *testing.T) {
 		}
 		return emit(agent.Event{Type: agent.EventCompleted, FinishReason: llm.FinishReasonCompleted, Iteration: 1})
 	})
+	// A token user@cluster names the user and its cluster; the issuer is
+	// the same node name on every cluster, as for the local users of om3.
 	verifier := tokenVerifierFunc(func(_ context.Context, token string) (auth.Identity, error) {
-		return auth.Identity{ClusterID: "cluster-id", Subject: token, Issuer: "test-node"}, nil
+		user, cluster, _ := strings.Cut(token, "@")
+		return auth.Identity{ClusterID: cmp.Or(cluster, "cluster-id"), Subject: user, Issuer: "node1"}, nil
 	})
 	handler, err := NewHandler([]Backend{{Name: "om3", Conversations: turnService{run: asker}, Authenticator: verifier}},
 		HandlerConfig{MaxConcurrentAsks: 4, MaxConcurrentAsksPerUser: 1, AuditLogger: discardAuditLogger()})
@@ -531,6 +535,12 @@ func TestRunGivesEachUserAShareOfTheSlots(t *testing.T) {
 	handler.ServeHTTP(other, runAs("bob", "bob's"))
 	if other.Code != http.StatusOK {
 		t.Fatalf("bob's run: %d %s", other.Code, other.Body.String())
+	}
+	// The same issuer and subject on another cluster is another tenant.
+	elsewhere := httptest.NewRecorder()
+	handler.ServeHTTP(elsewhere, runAs("alice@cluster-2", "elsewhere"))
+	if elsewhere.Code != http.StatusOK {
+		t.Fatalf("alice on another cluster: %d %s", elsewhere.Code, elsewhere.Body.String())
 	}
 	close(release)
 	<-firstDone

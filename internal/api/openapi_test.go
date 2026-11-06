@@ -66,7 +66,7 @@ func TestOpenAPIDescribesTheRegisteredRoutes(t *testing.T) {
 		}
 	}
 	registered := []string{"GET /health", "GET /openapi.json"}
-	for _, route := range backendRoutes(nil, nil, nil, auditLogger{}) {
+	for _, route := range backendRoutes("", nil, nil, nil, auditLogger{}) {
 		registered = append(registered, route.method+" /v1/{backend}"+route.path)
 	}
 	sort.Strings(documented)

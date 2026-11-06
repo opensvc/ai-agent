@@ -121,8 +121,8 @@ WHERE id = ?`, feedback.Rating, reasons, feedback.Expected, toUnixNano(record.Cr
 }
 
 // makeRoomForFeedback checks that owner may store one more feedback: at most
-// MaxUserFeedback on the turns of their conversations, its issuer and
-// subject on every backend and cluster. With the instance full, the oldest
+// MaxUserFeedback on the turns of their conversations of its backend and
+// cluster. With the instance full, the oldest
 // feedback of a deleted conversation goes, which nobody can withdraw any
 // more: one user deleting the conversations they rated does not block the
 // feedback of the others for the retention.
@@ -131,8 +131,8 @@ func (s *Store) makeRoomForFeedback(ctx context.Context, tx *sql.Tx, owner conve
 	if err := tx.QueryRowContext(ctx, `
 SELECT
   (SELECT COUNT(*) FROM feedback AS f JOIN turns AS t ON t.id = f.turn_id JOIN conversations AS c ON c.id = t.conversation_id
-   WHERE c.issuer = ? AND c.subject = ?),
-  (SELECT COUNT(*) FROM feedback)`, owner.Issuer, owner.Subject).Scan(&owned, &count); err != nil {
+   WHERE c.backend = ? AND c.cluster_id = ? AND c.issuer = ? AND c.subject = ?),
+  (SELECT COUNT(*) FROM feedback)`, owner.Backend, owner.ClusterID, owner.Issuer, owner.Subject).Scan(&owned, &count); err != nil {
 		return fmt.Errorf("count feedback: %w", err)
 	}
 	if owned >= s.config.MaxUserFeedback {

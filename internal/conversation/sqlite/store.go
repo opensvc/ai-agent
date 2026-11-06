@@ -37,14 +37,15 @@ type Config struct {
 	MaxMessages          int
 	MaxConversationBytes int64
 	MaxDatabaseBytes     int64
-	// MaxUserBytes bounds the bytes the conversations of one user store,
-	// its issuer and subject, every backend and cluster together, so that
+	// MaxUserBytes bounds the bytes the conversations of one user store on
+	// one backend and cluster, so that
 	// one user does not fill the database for the others; 0 for a share of
 	// MaxDatabaseBytes, defaultUserBytesShare, at least MaxConversationBytes.
 	MaxUserBytes int64
 	MaxFeedback  int
 	// MaxUserFeedback bounds the feedback one user stores on the turns of
-	// their conversations; 0 for a share of MaxFeedback,
+	// their conversations of one backend and cluster; 0 for a share of
+	// MaxFeedback,
 	// defaultUserFeedbackShare.
 	MaxUserFeedback int
 }

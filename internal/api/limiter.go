@@ -4,8 +4,8 @@ import "sync"
 
 // askLimiter bounds the runs of the agent: maxConcurrent in the whole
 // process, every user, backend and cluster together, and perUser for one
-// user, its issuer and subject, so that one user cannot hold every slot and
-// deny the runs of the others.
+// user of one backend and cluster, so that one user cannot hold every slot
+// and deny the runs of the others.
 type askLimiter struct {
 	mu            sync.Mutex
 	maxConcurrent int
@@ -27,9 +27,12 @@ func newAskLimiter(maxConcurrent, perUser int) *askLimiter {
 	return &askLimiter{maxConcurrent: maxConcurrent, perUser: perUser, byUser: map[string]int{}}
 }
 
-// userKey is the key of a user, its issuer and subject.
-func userKey(issuer, subject string) string {
-	return issuer + "\x00" + subject
+// userKey is the key of a user: its backend, its cluster, its issuer and
+// its subject. The cluster is the tenant: a local user of om3 names its
+// node as its issuer, and two clusters may have a node of the same name,
+// and a root user each.
+func userKey(backend, clusterID, issuer, subject string) string {
+	return backend + "\x00" + clusterID + "\x00" + issuer + "\x00" + subject
 }
 
 // tryAcquire takes a slot for the user of key: the instance full refuses

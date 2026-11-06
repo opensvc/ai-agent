@@ -24,12 +24,14 @@ const (
 	maxListLimit       = 1000
 )
 
-// storedBytes sums the bytes the conversations of owner store, its issuer
-// and subject on every backend and cluster, and those of the database.
+// storedBytes sums the bytes the conversations of owner store, on its
+// backend and cluster, and those of the database. The cluster is the
+// tenant: a local user of om3 names its node as its issuer, which another
+// cluster may name too.
 func (s *Store) storedBytes(ctx context.Context, tx *sql.Tx, owner conversation.Owner) (user int64, database int64, err error) {
 	if err := tx.QueryRowContext(ctx, `
-SELECT COALESCE(SUM(CASE WHEN issuer = ? AND subject = ? THEN stored_bytes ELSE 0 END), 0), COALESCE(SUM(stored_bytes), 0)
-FROM conversations`, owner.Issuer, owner.Subject).Scan(&user, &database); err != nil {
+SELECT COALESCE(SUM(CASE WHEN backend = ? AND cluster_id = ? AND issuer = ? AND subject = ? THEN stored_bytes ELSE 0 END), 0), COALESCE(SUM(stored_bytes), 0)
+FROM conversations`, owner.Backend, owner.ClusterID, owner.Issuer, owner.Subject).Scan(&user, &database); err != nil {
 		return 0, 0, fmt.Errorf("sum conversation bytes: %w", err)
 	}
 	return user, database, nil

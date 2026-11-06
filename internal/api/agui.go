@@ -66,7 +66,7 @@ func aguiFrames(events []agui.Event) ([]byte, error) {
 // serveConversationRun runs the agent on a conversation for an AG-UI
 // client: a new prompt, the last message of the user, or the resume of the
 // confirmation the conversation waits on. The stream speaks AG-UI.
-func serveConversationRun(service ConversationService, limiter *askLimiter, audit auditLogger) http.HandlerFunc {
+func serveConversationRun(backend string, service ConversationService, limiter *askLimiter, audit auditLogger) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		id := request.PathValue("id")
 		attributes := []slog.Attr{slog.String("conversation_id", boundedAuditID(id))}
@@ -87,7 +87,7 @@ func serveConversationRun(service ConversationService, limiter *askLimiter, audi
 			writeUnauthorized(response)
 			return
 		}
-		key := userKey(identity.Issuer, identity.Subject)
+		key := userKey(backend, identity.ClusterID, identity.Issuer, identity.Subject)
 		if !acquireAgentSlot(response, request, limiter, key, audit, "conversation_run", attributes) {
 			return
 		}

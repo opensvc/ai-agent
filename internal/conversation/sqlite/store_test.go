@@ -609,6 +609,21 @@ func TestStoreGivesEachUserAShareOfTheBytes(t *testing.T) {
 		}
 		completeOwnerTurn(t, store, bob, "bob-1", "b-1", testNow, turn)
 	})
+	t.Run("per cluster", func(t *testing.T) {
+		// The same issuer and subject on another cluster, a local user of
+		// om3 on a node of the same name, has a share of its own.
+		store := open(t, size)
+		elsewhere := testOwner
+		elsewhere.ClusterID = "other-cluster"
+		if err := store.CreateConversation(t.Context(), testConversation("alice-2", elsewhere, testNow)); err != nil {
+			t.Fatal(err)
+		}
+		completeOwnerTurn(t, store, testOwner, "alice-1", "a-1", testNow, turn)
+		if _, err := store.BeginTurn(t.Context(), testOwner, "alice-1", "a-2", testNow.Add(time.Minute)); !errors.Is(err, conversation.ErrUserLimit) {
+			t.Fatalf("alice at her share = %v", err)
+		}
+		completeOwnerTurn(t, store, elsewhere, "alice-2", "e-1", testNow, turn)
+	})
 	t.Run("configuration", func(t *testing.T) {
 		if _, err := validateConfig(Config{Path: "x", MaxDatabaseBytes: 100, MaxConversationBytes: 10, MaxUserBytes: 101}); err == nil {
 			t.Error("a user share above the database accepted")

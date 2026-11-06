@@ -71,7 +71,7 @@ func NewHandler(backends []Backend, config HandlerConfig) (http.Handler, error) 
 		config.MaxConcurrentAsksPerUser = config.MaxConcurrentAsks
 	}
 	if config.MaxConcurrentAsksPerUser < 0 || config.MaxConcurrentAsksPerUser > config.MaxConcurrentAsks {
-		return nil, fmt.Errorf("API max concurrent asks per user must be between 1 and the max concurrent asks")
+		return nil, fmt.Errorf("API max concurrent asks per user must be between 1 and the max concurrent asks, or 0 for no share")
 	}
 	limiter := newAskLimiter(config.MaxConcurrentAsks, config.MaxConcurrentAsksPerUser)
 	mux := http.NewServeMux()
@@ -107,7 +107,7 @@ type backendRoute struct {
 	handler http.Handler
 }
 
-func backendRoutes(conversations ConversationService, tools ToolLister, limiter *askLimiter, audit auditLogger) []backendRoute {
+func backendRoutes(backend string, conversations ConversationService, tools ToolLister, limiter *askLimiter, audit auditLogger) []backendRoute {
 	return []backendRoute{
 		{"POST", "/conversations", serveCreateConversation(conversations, audit)},
 		{"GET", "/conversations", serveListConversations(conversations, audit)},
@@ -115,7 +115,7 @@ func backendRoutes(conversations ConversationService, tools ToolLister, limiter 
 		{"GET", "/conversations/{id}/messages", serveConversationMessages(conversations, audit)},
 		{"PATCH", "/conversations/{id}", serveUpdateConversationTitle(conversations, audit)},
 		{"DELETE", "/conversations/{id}", serveDeleteConversation(conversations, audit)},
-		{"POST", "/conversations/{id}/runs", serveConversationRun(conversations, limiter, audit)},
+		{"POST", "/conversations/{id}/runs", serveConversationRun(backend, conversations, limiter, audit)},
 		{"GET", "/capabilities", http.HandlerFunc(serveCapabilities)},
 		{"GET", "/tools", serveTools(tools, audit)},
 		{"PUT", "/conversations/{id}/turns/{turn_id}/feedback", servePutFeedback(conversations, audit)},
@@ -125,7 +125,7 @@ func backendRoutes(conversations ConversationService, tools ToolLister, limiter 
 
 func registerBackend(mux *http.ServeMux, backend Backend, limiter *askLimiter, audit auditLogger) {
 	prefix := "/v1/" + backend.Name
-	for _, route := range backendRoutes(backend.Conversations, backend.Tools, limiter, audit) {
+	for _, route := range backendRoutes(backend.Name, backend.Conversations, backend.Tools, limiter, audit) {
 		mux.Handle(route.method+" "+prefix+route.path, requireAccessToken(backend.Authenticator, audit, route.handler))
 	}
 }
