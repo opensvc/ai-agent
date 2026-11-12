@@ -34,6 +34,7 @@ The routes of a backend, here `om3`; `oc3` has the same routes under
 | `PATCH /v1/om3/conversations/{id}` | Rename it |
 | `DELETE /v1/om3/conversations/{id}` | Delete it |
 | `POST /v1/om3/conversations/{id}/runs` | Send a prompt, or answer a pending action, streamed in AG-UI; see [Runs](#runs) |
+| `POST /v1/om3/runs` | Run one prompt for a client no user watches, read-only, nothing stored; see [Unattended runs](#unattended-runs) |
 | `GET /v1/om3/capabilities` | What the runs route can do, as an AG-UI `AgentCapabilities` |
 | `GET /v1/om3/tools` | The tools the assistant may call for the caller; see [Tools](#tools) |
 | `PUT /v1/om3/conversations/{id}/turns/{turn_id}/feedback` | Give or replace the feedback on a turn |
@@ -433,6 +434,54 @@ undeclared, `humanInTheLoop`
 `approvals`, `interrupts` and `approveWithEdits`, and `multimodal`
 `input` text only. `HttpAgent` does not read it: a client subclassing it
 implements `getCapabilities()` with it.
+
+### Unattended runs
+
+`POST /v1/{backend}/runs` runs the agent once for a client no user watches,
+such as the scheduler of a collector sending a report: nobody can answer a
+question or confirm an action, and nothing is stored.
+
+- The request is an AG-UI `RunAgentInput` holding exactly one message of the
+  user, the prompt, without history. `tools` must be empty or absent and
+  `resume` absent, or 400 (`invalid_tools`, `invalid_decision`,
+  `invalid_prompt`). `threadId` and `runId` are any IDs of the client, at
+  most 128 printable bytes: nothing is stored under them, and the audit
+  carries `run_id`, with the `request_id` the response returns, to find the
+  run in the logs of both sides.
+- The model is offered only the tools of the MCP whose annotations declare
+  them read-only (`readOnlyHint: true`). A tool without annotations, a write,
+  even one the conversations run without confirmation, a destructive tool
+  and a hidden tool are left out, closed by default. A skill naming one is
+  told it is not served, and a call of one is answered as unoffered without
+  reaching the MCP. The system prompt tells the model the turn is
+  unattended.
+- The run never waits: it completes, or fails with `RUN_ERROR`. It takes a
+  slot of the user as a conversation run does, and the same bounds: the
+  prompt at most 32 KiB, the turn its timeout and iterations. A client
+  running several at once for one account stays within
+  `OPENSVC_AI_MAX_CONCURRENT_ASKS_PER_USER`, or gets 429.
+- The stream speaks AG-UI, as a conversation run. `RUN_FINISHED` carries in
+  its `result` the summary of the run, by identifiers only, never the
+  arguments of a call nor its result:
+
+```json
+{"unattended": true, "finishReason": "completed",
+ "toolCalls": [{"id": "call-1", "name": "list_alerts", "durationMs": 1500, "error": false},
+               {"id": "call-2", "name": "attach_node_tag", "durationMs": 0, "error": true, "notRun": "unoffered"}],
+ "toolCallCount": 2, "notRunCalls": 1, "refusedCalls": 0}
+```
+
+  `toolCalls` lists the first 256 calls; `toolCallCount` counts them all.
+  A call that did not run carries `notRun`: `unoffered`, a tool the run does
+  not offer, such as a write, or `needs_confirmation`; `notRunCalls` counts
+  them, the writes the model asked for. `refusedCalls` counts the calls the
+  bounds of the question refused before they ran, none of them listed.
+
+The read-only tools are as safe as their annotations: a tool wrongly
+declared read-only runs without confirmation. The account of the client is
+the guarantee that does not depend on them, and its choice is the client's:
+an account of read groups only, without privileges, changes nothing
+whatever the tools.
 
 ### Tools
 
