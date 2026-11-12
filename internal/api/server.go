@@ -41,6 +41,9 @@ type Backend struct {
 	// Tools lists the tools of the MCP of the backend, as the user; nil, the
 	// backend lists none.
 	Tools ToolLister
+	// Runner runs the unattended runs of the backend, on no conversation;
+	// nil, the backend serves none.
+	Runner UnattendedRunner
 }
 
 // Authenticator establishes the identity of a request to one backend, through
@@ -107,7 +110,7 @@ type backendRoute struct {
 	handler http.Handler
 }
 
-func backendRoutes(backend string, conversations ConversationService, tools ToolLister, limiter *askLimiter, audit auditLogger) []backendRoute {
+func backendRoutes(backend string, conversations ConversationService, tools ToolLister, runner UnattendedRunner, limiter *askLimiter, audit auditLogger) []backendRoute {
 	return []backendRoute{
 		{"POST", "/conversations", serveCreateConversation(conversations, audit)},
 		{"GET", "/conversations", serveListConversations(conversations, audit)},
@@ -116,6 +119,7 @@ func backendRoutes(backend string, conversations ConversationService, tools Tool
 		{"PATCH", "/conversations/{id}", serveUpdateConversationTitle(conversations, audit)},
 		{"DELETE", "/conversations/{id}", serveDeleteConversation(conversations, audit)},
 		{"POST", "/conversations/{id}/runs", serveConversationRun(backend, conversations, limiter, audit)},
+		{"POST", "/runs", serveUnattendedRun(backend, runner, limiter, audit)},
 		{"GET", "/capabilities", http.HandlerFunc(serveCapabilities)},
 		{"GET", "/tools", serveTools(tools, audit)},
 		{"PUT", "/conversations/{id}/turns/{turn_id}/feedback", servePutFeedback(conversations, audit)},
@@ -125,7 +129,7 @@ func backendRoutes(backend string, conversations ConversationService, tools Tool
 
 func registerBackend(mux *http.ServeMux, backend Backend, limiter *askLimiter, audit auditLogger) {
 	prefix := "/v1/" + backend.Name
-	for _, route := range backendRoutes(backend.Name, backend.Conversations, backend.Tools, limiter, audit) {
+	for _, route := range backendRoutes(backend.Name, backend.Conversations, backend.Tools, backend.Runner, limiter, audit) {
 		mux.Handle(route.method+" "+prefix+route.path, requireAccessToken(backend.Authenticator, audit, route.handler))
 	}
 }

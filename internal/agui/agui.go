@@ -166,7 +166,14 @@ type Encoder struct {
 	// at is the time of the agent event being encoded, zero for an event
 	// the agent did not stamp: the AG-UI events it gives carry it.
 	at time.Time
+	// result, when set, gives the result of RUN_FINISHED in place of the
+	// turn ID, for a run no conversation stores.
+	result func() any
 }
+
+// SetResult gives the result RUN_FINISHED carries, read when the run
+// finishes: what a run no conversation stores says of itself.
+func (e *Encoder) SetResult(result func() any) { e.result = result }
 
 func (e *Encoder) runUsage() []Usage {
 	if !e.seen {
@@ -352,8 +359,12 @@ func (e *Encoder) Encode(event agent.Event) ([]Event, error) {
 	case agent.EventCompleted:
 		events := e.closeText()
 		e.ended = true
+		var result any = map[string]string{"turnId": event.TurnID}
+		if e.result != nil {
+			result = e.result()
+		}
 		return append(events, e.stamp(Event{Type: RunFinished, ThreadID: e.threadID, RunID: e.runID,
-			Outcome: &Outcome{Type: "success"}, Result: map[string]string{"turnId": event.TurnID}, Usage: e.runUsage()})), nil
+			Outcome: &Outcome{Type: "success"}, Result: result, Usage: e.runUsage()})), nil
 	case agent.EventClientToolsPending:
 		// The run is complete: the calls of the tools of the client, which
 		// it emitted, are the client's to answer in the next run.

@@ -208,6 +208,15 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 		allTools[tool.Name] = tool
 	}
 	offeredTools := modelTools(mcpTools)
+	// An unattended turn offers the read-only tools only, and none of the
+	// client: nobody is there to confirm a call, or to answer one.
+	unattended := Unattended(ctx)
+	if unattended {
+		if len(clientToolsFrom(ctx)) > 0 {
+			return result, fmt.Errorf("an unattended turn takes no tools of the client")
+		}
+		offeredTools = readOnlyTools(offeredTools)
+	}
 	tools, _, err := convertTools(offeredTools)
 	if err != nil {
 		return result, err
@@ -251,6 +260,9 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 	systemPrompt := a.config.SystemPrompt
 	if selection.search {
 		systemPrompt += "\n" + searchInstruction
+	}
+	if unattended {
+		systemPrompt += "\n" + unattendedInstruction
 	}
 	promptSum := sha256.Sum256([]byte(systemPrompt))
 	// finish completes a result with what the turn used and was given.
@@ -409,7 +421,7 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 					return false, err
 				}
 				unoffered := llm.ToolResult{CallID: call.ID, Content: textToolResult(unofferedToolResult), IsError: true}
-				if err := emitAgentEvent(emit, Event{Type: EventToolFinished, ToolName: call.Name, ToolError: true, ToolCallID: call.ID, ToolResult: unoffered.Content, Iteration: state.Iteration}); err != nil {
+				if err := emitAgentEvent(emit, Event{Type: EventToolFinished, ToolName: call.Name, ToolError: true, NotRun: NotRunUnoffered, ToolCallID: call.ID, ToolResult: unoffered.Content, Iteration: state.Iteration}); err != nil {
 					return false, err
 				}
 				state.Results = append(state.Results, unoffered)
@@ -421,6 +433,17 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 			}
 			if callDecision == DecisionReject {
 				state.Results = append(state.Results, llm.ToolResult{CallID: call.ID, Content: rejectedToolResult, IsError: true})
+				continue
+			}
+			if unattended && requiresConfirmation(tool) {
+				refused := llm.ToolResult{CallID: call.ID, Content: textToolResult(unattendedToolResult), IsError: true}
+				if err := emitAgentEvent(emit, Event{Type: EventToolStarted, ToolName: call.Name, ToolCallID: call.ID, ToolArguments: call.Arguments, Iteration: state.Iteration}); err != nil {
+					return false, err
+				}
+				if err := emitAgentEvent(emit, Event{Type: EventToolFinished, ToolName: call.Name, ToolError: true, NotRun: NotRunNeedsConfirmation, ToolCallID: call.ID, ToolResult: refused.Content, Iteration: state.Iteration}); err != nil {
+					return false, err
+				}
+				state.Results = append(state.Results, refused)
 				continue
 			}
 			if callDecision != DecisionApprove && requiresConfirmation(tool) {

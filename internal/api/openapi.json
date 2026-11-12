@@ -850,6 +850,108 @@
         }
       }
     },
+    "/v1/{backend}/runs": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/Backend"
+        },
+        {
+          "$ref": "#/components/parameters/ClusterID"
+        },
+        {
+          "$ref": "#/components/parameters/Node"
+        }
+      ],
+      "post": {
+        "operationId": "runUnattended",
+        "tags": [
+          "turns"
+        ],
+        "summary": "Run the agent once for a client no user watches, such as the scheduler of a collector: the one message of the user is the prompt, on no history, and nothing is stored. The model is offered only the tools of the MCP whose annotations declare them read-only (readOnlyHint true): a tool without annotations, a write, a destructive or a hidden tool is left out, and a skill naming one is told it is not served. The run never waits on a confirmation or on a client: it completes, or fails. It takes a slot of the user, as a conversation run, and the same bounds. The stream speaks AG-UI; RUN_FINISHED carries the summary of the calls in its result. The runId names the run in the audit, with the request ID.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnattendedRunInput"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The run is streamed.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "Server-sent events of the AG-UI protocol, as for a conversation run. The run starts with RUN_STARTED and ends with RUN_FINISHED, whose outcome is success and whose result is an UnattendedSummary, or RUN_ERROR. A RUN_ERROR carries a code: `request_timeout` or `agent_failed`."
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "503": {
+            "$ref": "#/components/responses/AuthenticationUnavailable"
+          },
+          "400": {
+            "description": "The body is not a RunAgentInput, its runId or threadId is invalid, it offers tools of the client, it resumes, or it does not hold exactly one message of the user with text. Codes: `invalid_request`, `invalid_protocol_version`, `unsupported_protocol_version`, `invalid_run_id`, `invalid_thread_id`, `invalid_tools`, `invalid_decision`, `invalid_prompt`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The backend serves no unattended run. Codes: `unattended_unavailable`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The body exceeds 4 MiB, or the message of the user 32 KiB. Codes: `request_too_large`, `prompt_too_large`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "The body is not JSON. Codes: `unsupported_media_type`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          },
+          "500": {
+            "description": "The stream could not be opened. Codes: `streaming_unavailable`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/{backend}/capabilities": {
       "parameters": [
         {
@@ -1707,6 +1809,126 @@
           "needs_confirmation": {
             "type": "boolean",
             "description": "A call of the tool waits for the confirmation of the user: a tool not read-only, unless it declares itself not destructive."
+          }
+        }
+      },
+      "UnattendedRunInput": {
+        "type": "object",
+        "description": "The AG-UI RunAgentInput of an unattended run: threadId and runId name the run for the client and the audit, nothing is stored under them; messages holds one message of the user; tools must be empty or absent, resume absent. The other members are not read.",
+        "required": [
+          "threadId",
+          "runId",
+          "messages"
+        ],
+        "properties": {
+          "threadId": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "Any ID of the client, at most 128 printable bytes without spaces."
+          },
+          "runId": {
+            "type": "string",
+            "maxLength": 128,
+            "description": "The ID of the run, at most 128 printable bytes without spaces; the audit carries it."
+          },
+          "protocolVersion": {
+            "type": "string"
+          },
+          "messages": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 1,
+            "items": {
+              "type": "object",
+              "required": [
+                "role",
+                "content"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "role": {
+                  "const": "user"
+                },
+                "content": {
+                  "description": "A string, or text parts."
+                }
+              }
+            }
+          },
+          "tools": {
+            "type": "array",
+            "maxItems": 0
+          }
+        }
+      },
+      "UnattendedSummary": {
+        "type": "object",
+        "description": "What an unattended run did, by identifiers only: never the arguments of a call nor its result.",
+        "required": [
+          "unattended",
+          "finishReason",
+          "toolCalls",
+          "toolCallCount",
+          "notRunCalls",
+          "refusedCalls"
+        ],
+        "properties": {
+          "unattended": {
+            "const": true
+          },
+          "finishReason": {
+            "type": "string"
+          },
+          "toolCalls": {
+            "type": "array",
+            "maxItems": 256,
+            "description": "The calls of tools the run made, in order, the first 256.",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "name",
+                "durationMs",
+                "error"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "durationMs": {
+                  "type": "integer"
+                },
+                "error": {
+                  "type": "boolean",
+                  "description": "Set on a call that failed, or did not run."
+                },
+                "notRun": {
+                  "type": "string",
+                  "enum": [
+                    "unoffered",
+                    "needs_confirmation"
+                  ],
+                  "description": "Why the call did not run: the tool is not offered, such as a write, or the call needs a confirmation; absent for a call that ran."
+                }
+              }
+            }
+          },
+          "toolCallCount": {
+            "type": "integer",
+            "description": "The calls of tools the run made, beyond those listed."
+          },
+          "notRunCalls": {
+            "type": "integer",
+            "description": "The calls that did not run, the tool not offered or the call needing a confirmation: the writes the model asked for."
+          },
+          "refusedCalls": {
+            "type": "integer",
+            "description": "The calls the bounds of the question refused before they ran, too many at once or in all; none is listed."
           }
         }
       }

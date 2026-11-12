@@ -263,7 +263,7 @@ func newBackend(spec backendSpec, model llm.Client, store conversation.Store, ag
 	if err != nil {
 		return api.Backend{}, nil, fmt.Errorf("create conversation service: %w", err)
 	}
-	return api.Backend{Name: spec.name, Conversations: service, Authenticator: spec.newAuthenticator(client), Tools: orchestrator}, service, nil
+	return api.Backend{Name: spec.name, Conversations: service, Authenticator: spec.newAuthenticator(client), Tools: orchestrator, Runner: orchestrator}, service, nil
 }
 
 // listenHTTPS loads the TLS identity before opening the TCP listener.

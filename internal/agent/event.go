@@ -53,6 +53,10 @@ type Event struct {
 	// PendingCalls are the calls of tools of the client the turn waits on,
 	// in the order they were made.
 	PendingCalls []string
+	// NotRun tells, on a tool_finished event, why the call did not run:
+	// NotRunUnoffered or NotRunNeedsConfirmation; empty for a call that ran,
+	// successfully or not.
+	NotRun string
 	// Refused describes the answer of a tool_calls_refused event.
 	Refused *RefusedCalls
 	// AgentCall describes the call of an agent_tool_called event.
@@ -139,3 +143,13 @@ func (e Event) Validate() error {
 	}
 	return nil
 }
+
+// The reasons a call of the model did not run, on its tool_finished event.
+const (
+	// NotRunUnoffered is a call of a tool the turn does not offer, such as
+	// a write in an unattended turn.
+	NotRunUnoffered = "unoffered"
+	// NotRunNeedsConfirmation is a call that needs the confirmation of a
+	// user, in an unattended turn.
+	NotRunNeedsConfirmation = "needs_confirmation"
+)
