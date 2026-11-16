@@ -117,9 +117,12 @@ type wireToolDelta struct {
 }
 
 type wireUsage struct {
-	PromptTokens     int64 `json:"prompt_tokens"`
-	CompletionTokens int64 `json:"completion_tokens"`
-	TotalTokens      int64 `json:"total_tokens"`
+	PromptTokens        int64 `json:"prompt_tokens"`
+	CompletionTokens    int64 `json:"completion_tokens"`
+	TotalTokens         int64 `json:"total_tokens"`
+	PromptTokensDetails *struct {
+		CachedTokens int64 `json:"cached_tokens"`
+	} `json:"prompt_tokens_details"`
 }
 
 type wireError struct {
@@ -180,10 +183,17 @@ func (s *streamState) consume(data []byte) error {
 		}
 	}
 	if chunk.Usage != nil {
+		// The tokens read from the cache are counted in the prompt; a
+		// compatible endpoint counting more is not believed beyond it.
+		var cached int64
+		if details := chunk.Usage.PromptTokensDetails; details != nil {
+			cached = min(max(details.CachedTokens, 0), max(chunk.Usage.PromptTokens, 0))
+		}
 		if err := s.emitEvent(llm.Event{Type: llm.EventUsage, Usage: &llm.Usage{
-			InputTokens:  chunk.Usage.PromptTokens,
-			OutputTokens: chunk.Usage.CompletionTokens,
-			TotalTokens:  chunk.Usage.TotalTokens,
+			InputTokens:     chunk.Usage.PromptTokens,
+			OutputTokens:    chunk.Usage.CompletionTokens,
+			TotalTokens:     chunk.Usage.TotalTokens,
+			CacheReadTokens: cached,
 		}}); err != nil {
 			return err
 		}

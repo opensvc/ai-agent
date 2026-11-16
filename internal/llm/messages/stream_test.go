@@ -40,7 +40,7 @@ func textStream() string {
 func collectStream(t *testing.T, stream string) ([]llm.Event, error) {
 	t.Helper()
 	var events []llm.Event
-	err := consumeStream(strings.NewReader(stream), func(event llm.Event) error {
+	err := consumeStream(strings.NewReader(stream), "", func(event llm.Event) error {
 		if err := event.Validate(); err != nil {
 			t.Fatalf("invalid neutral event: %v", err)
 		}
@@ -61,7 +61,7 @@ func TestStreamTextAndCumulativeUsage(t *testing.T) {
 	}
 	want := []llm.Event{
 		{Type: llm.EventTextDelta, TextDelta: "OK"},
-		{Type: llm.EventUsage, Usage: &llm.Usage{InputTokens: 17, OutputTokens: 5, TotalTokens: 22}},
+		{Type: llm.EventUsage, Usage: &llm.Usage{InputTokens: 17, OutputTokens: 5, TotalTokens: 22, CacheReadTokens: 4, CacheWriteTokens: 3}},
 		{Type: llm.EventCompleted, FinishReason: llm.FinishReasonCompleted},
 	}
 	if !reflect.DeepEqual(events, want) {
@@ -110,9 +110,10 @@ func TestStreamSupportsInitialBlockContent(t *testing.T) {
 
 const thinkingStartEvent = `{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}`
 
-// The thinking of the recent models, adaptive by default, is neither shown
-// nor a failure: the answer and its calls come as without it.
-func TestStreamSkipsThinking(t *testing.T) {
+// The thinking of the recent models, adaptive by default, is never shown:
+// it comes back as the reasoning of the answer, its blocks in their order,
+// bound to the fingerprint of the request.
+func TestStreamKeepsThinkingForTheTurn(t *testing.T) {
 	stream := sse(startEvent,
 		thinkingStartEvent,
 		`{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"private reasoning"}}`,
@@ -127,7 +128,14 @@ func TestStreamSkipsThinking(t *testing.T) {
 		strings.Replace(toolDeltaEvent, `"index":0`, `"index":3`, 1),
 		`{"type":"content_block_stop","index":3}`,
 		toolFinishEvent, stopEvent)
-	events, err := collectStream(t, stream)
+	var events []llm.Event
+	err := consumeStream(strings.NewReader(stream), "request-fingerprint", func(event llm.Event) error {
+		if err := event.Validate(); err != nil {
+			t.Fatalf("invalid neutral event: %v", err)
+		}
+		events = append(events, event)
+		return nil
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,9 +146,31 @@ func TestStreamSkipsThinking(t *testing.T) {
 			t.Fatalf("thinking shown: %#v", event)
 		}
 	}
-	want := []llm.EventType{llm.EventTextDelta, llm.EventToolCall, llm.EventUsage, llm.EventCompleted}
+	want := []llm.EventType{llm.EventTextDelta, llm.EventToolCall, llm.EventReasoning, llm.EventUsage, llm.EventCompleted}
 	if !reflect.DeepEqual(types, want) || events[0].TextDelta != "OK" || string(events[1].ToolCall.Arguments) != `{"node":"node1"}` {
 		t.Fatalf("events = %#v", events)
+	}
+	reasoning := events[2].Reasoning
+	wantData := `{"fingerprint":"request-fingerprint","content":[` +
+		`{"type":"thinking","thinking":"private reasoning","signature":"c2lnbmF0dXJl"},` +
+		`{"type":"redacted_thinking","data":"opaque"},` +
+		`{"type":"text","text":"OK"},` +
+		`{"type":"tool_use","id":"call-1","name":"health","input":{"node":"node1"}}]}`
+	if reasoning.Protocol != Protocol || string(reasoning.Data) != wantData {
+		t.Fatalf("reasoning = %s %s", reasoning.Protocol, reasoning.Data)
+	}
+}
+
+// An answer without thinking has no reasoning to give back.
+func TestStreamWithoutThinkingHasNoReasoning(t *testing.T) {
+	events, err := collectStream(t, sse(startEvent, toolStartEvent, toolDeltaEvent, blockStopEvent, toolFinishEvent, stopEvent))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range events {
+		if event.Type == llm.EventReasoning {
+			t.Fatalf("reasoning without thinking: %#v", event)
+		}
 	}
 }
 
@@ -214,7 +244,7 @@ func TestStreamProviderErrorsDoNotExposeRawPayload(t *testing.T) {
 
 func TestStreamPropagatesConsumerErrors(t *testing.T) {
 	want := errors.New("stop")
-	err := consumeStream(strings.NewReader(textStream()), func(llm.Event) error { return want })
+	err := consumeStream(strings.NewReader(textStream()), "", func(llm.Event) error { return want })
 	if !errors.Is(err, want) {
 		t.Fatalf("error = %v, want %v", err, want)
 	}

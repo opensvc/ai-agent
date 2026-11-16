@@ -37,6 +37,9 @@ func (r Request) Validate() error {
 }
 
 func (m Message) validate() error {
+	if m.Reasoning != nil && m.Role != RoleAssistant {
+		return fmt.Errorf("%s message carries reasoning", m.Role)
+	}
 	switch m.Role {
 	case RoleSystem, RoleUser:
 		if strings.TrimSpace(m.Text) == "" {
@@ -46,6 +49,11 @@ func (m Message) validate() error {
 			return fmt.Errorf("%s message contains tool content", m.Role)
 		}
 	case RoleAssistant:
+		if m.Reasoning != nil {
+			if err := m.Reasoning.validate(); err != nil {
+				return err
+			}
+		}
 		if strings.TrimSpace(m.Text) == "" && len(m.ToolCalls) == 0 {
 			return fmt.Errorf("assistant message has no content")
 		}
@@ -105,7 +113,7 @@ func (e Event) Validate() error {
 		if e.TextDelta == "" {
 			return fmt.Errorf("text delta is empty")
 		}
-		if e.ToolCall != nil || e.Usage != nil || e.FinishReason != "" {
+		if e.ToolCall != nil || e.Usage != nil || e.FinishReason != "" || e.Reasoning != nil {
 			return fmt.Errorf("text delta event contains unrelated fields")
 		}
 	case EventToolCall:
@@ -115,28 +123,54 @@ func (e Event) Validate() error {
 		if err := e.ToolCall.validate(); err != nil {
 			return fmt.Errorf("tool call event: %w", err)
 		}
-		if e.TextDelta != "" || e.Usage != nil || e.FinishReason != "" {
+		if e.TextDelta != "" || e.Usage != nil || e.FinishReason != "" || e.Reasoning != nil {
 			return fmt.Errorf("tool call event contains unrelated fields")
 		}
 	case EventUsage:
 		if e.Usage == nil {
 			return fmt.Errorf("usage event has no counters")
 		}
-		if e.Usage.InputTokens < 0 || e.Usage.OutputTokens < 0 || e.Usage.TotalTokens < 0 {
+		if e.Usage.InputTokens < 0 || e.Usage.OutputTokens < 0 || e.Usage.TotalTokens < 0 || e.Usage.CacheReadTokens < 0 || e.Usage.CacheWriteTokens < 0 {
 			return fmt.Errorf("usage event contains negative counters")
 		}
-		if e.TextDelta != "" || e.ToolCall != nil || e.FinishReason != "" {
+		if e.Usage.CacheReadTokens > e.Usage.InputTokens || e.Usage.CacheWriteTokens > e.Usage.InputTokens-e.Usage.CacheReadTokens {
+			return fmt.Errorf("usage event counts more cached tokens than input tokens")
+		}
+		if e.TextDelta != "" || e.ToolCall != nil || e.FinishReason != "" || e.Reasoning != nil {
 			return fmt.Errorf("usage event contains unrelated fields")
 		}
 	case EventCompleted:
 		if !e.FinishReason.valid() {
 			return fmt.Errorf("completed event has invalid finish reason %q", e.FinishReason)
 		}
-		if e.TextDelta != "" || e.ToolCall != nil || e.Usage != nil {
+		if e.TextDelta != "" || e.ToolCall != nil || e.Usage != nil || e.Reasoning != nil {
 			return fmt.Errorf("completed event contains unrelated fields")
+		}
+	case EventReasoning:
+		if e.Reasoning == nil {
+			return fmt.Errorf("reasoning event has no reasoning")
+		}
+		if err := e.Reasoning.validate(); err != nil {
+			return err
+		}
+		if e.TextDelta != "" || e.ToolCall != nil || e.Usage != nil || e.FinishReason != "" {
+			return fmt.Errorf("reasoning event contains unrelated fields")
 		}
 	default:
 		return fmt.Errorf("unsupported event type %q", e.Type)
+	}
+	return nil
+}
+
+func (r *Reasoning) validate() error {
+	if strings.TrimSpace(r.Protocol) == "" {
+		return fmt.Errorf("reasoning names no protocol")
+	}
+	if len(r.Data) > MaxReasoningBytes {
+		return fmt.Errorf("reasoning exceeds %d bytes", MaxReasoningBytes)
+	}
+	if err := validateJSONObject(r.Data); err != nil {
+		return fmt.Errorf("reasoning data: %w", err)
 	}
 	return nil
 }

@@ -267,6 +267,12 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 	promptSum := sha256.Sum256([]byte(systemPrompt))
 	// finish completes a result with what the turn used and was given.
 	finish := func(turn TurnResult) TurnResult {
+		// The reasoning of the model lives as long as the run: neither the
+		// history nor a turn waiting on the user keeps it.
+		turn.Messages = withoutReasoning(turn.Messages)
+		if turn.Suspended != nil {
+			turn.Suspended.Messages = withoutReasoning(turn.Suspended.Messages)
+		}
 		turn.MCP = result.MCP
 		turn.Exposure = Exposure{
 			SystemPromptSHA256: hex.EncodeToString(promptSum[:]), ToolSearch: selection.search,
@@ -280,6 +286,10 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 	messages = append(messages, history...)
 	messages = append(messages, state.Messages...)
 	llmContext := auth.WithoutAuthentication(ctx)
+	// pendingReasoning is the reasoning of the answer of state.Calls, given
+	// back with it in the next requests of the run; a turn waiting on the
+	// user resumes without it.
+	var pendingReasoning *llm.Reasoning
 
 	// executeCalls runs the calls of the current iteration left to run, and
 	// reports whether one waits for a confirmation.
@@ -516,11 +526,12 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 				snapshot := *state
 				return finish(TurnResult{Suspended: &snapshot}), nil
 			}
-			assistantMessage := llm.Message{Role: llm.RoleAssistant, Text: state.Text, ToolCalls: state.Calls}
+			assistantMessage := llm.Message{Role: llm.RoleAssistant, Text: state.Text, ToolCalls: state.Calls, Reasoning: pendingReasoning}
 			toolMessage := llm.Message{Role: llm.RoleTool, ToolResults: state.Results}
 			messages = append(messages, assistantMessage, toolMessage)
 			state.Messages = append(state.Messages, assistantMessage, toolMessage)
 			state.Calls, state.Results, state.Text, state.ToolTitle, state.ArgumentTypes = nil, nil, "", "", nil
+			pendingReasoning = nil
 			state.InputSchema, state.EditedArguments, state.ToolSHA256 = nil, nil, ""
 			state.ClientCalls, state.ClientResults = nil, nil
 		}
@@ -531,6 +542,7 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 		iteration := state.Iteration
 		var (
 			calls        []llm.ToolCall
+			reasoning    *llm.Reasoning
 			turnText     strings.Builder
 			finishReason llm.FinishReason
 			completion   bool
@@ -599,6 +611,11 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 				call := *event.ToolCall
 				call.Arguments = append(json.RawMessage(nil), event.ToolCall.Arguments...)
 				calls = append(calls, call)
+			case llm.EventReasoning:
+				if reasoning != nil {
+					return fmt.Errorf("LLM emitted the reasoning of an answer twice")
+				}
+				reasoning = &llm.Reasoning{Protocol: event.Reasoning.Protocol, Data: append(json.RawMessage(nil), event.Reasoning.Data...)}
 			case llm.EventUsage:
 				usage := *event.Usage
 				return emitAgentEvent(emit, Event{Type: EventUsage, Usage: &usage, Iteration: iteration, ModelDuration: time.Since(modelStart), ModelFirstEvent: firstEvent})
@@ -672,11 +689,11 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 			for _, call := range calls {
 				results = append(results, llm.ToolResult{CallID: call.ID, Content: refusal, IsError: true})
 			}
-			state.Calls, state.Results, state.Text = calls, results, turnText.String()
+			state.Calls, state.Results, state.Text, pendingReasoning = calls, results, turnText.String(), reasoning
 			continue
 		}
 		state.TotalToolCalls += len(calls)
-		state.Calls, state.Results, state.Text = calls, nil, turnText.String()
+		state.Calls, state.Results, state.Text, pendingReasoning = calls, nil, turnText.String(), reasoning
 	}
 }
 
@@ -704,4 +721,17 @@ func callLimitRefusal(asked, ran int) (string, json.RawMessage) {
 			"Ask for fewer, or answer with what you have.", ran, maxToolCallsPerAsk, maxToolCallsPerAsk-ran, asked))
 	}
 	return "", nil
+}
+
+// withoutReasoning returns messages without the reasoning of the model,
+// which lives as long as the run.
+func withoutReasoning(messages []llm.Message) []llm.Message {
+	if !slices.ContainsFunc(messages, func(message llm.Message) bool { return message.Reasoning != nil }) {
+		return messages
+	}
+	stripped := slices.Clone(messages)
+	for index := range stripped {
+		stripped[index].Reasoning = nil
+	}
+	return stripped
 }

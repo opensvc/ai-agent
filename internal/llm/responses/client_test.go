@@ -41,7 +41,7 @@ func TestClientStreamsTextAndUsage(t *testing.T) {
 		response.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 		_, _ = fmt.Fprint(response, "event: response.output_text.delta\r\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"cluster \"}\r\n\r\n")
 		_, _ = fmt.Fprint(response, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"healthy\"}\r\n\r\n")
-		_, _ = fmt.Fprint(response, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":2,\"total_tokens\":12},\"output\":[]}}\r\n\r\n")
+		_, _ = fmt.Fprint(response, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":2,\"total_tokens\":12,\"input_tokens_details\":{\"cached_tokens\":6}},\"output\":[]}}\r\n\r\n")
 	}))
 	t.Cleanup(server.Close)
 
@@ -60,7 +60,7 @@ func TestClientStreamsTextAndUsage(t *testing.T) {
 	if events[0].TextDelta+events[1].TextDelta != "cluster healthy" {
 		t.Fatalf("unexpected text events %#v", events[:2])
 	}
-	if events[2].Type != llm.EventUsage || events[2].Usage.TotalTokens != 12 {
+	if events[2].Type != llm.EventUsage || events[2].Usage.TotalTokens != 12 || events[2].Usage.CacheReadTokens != 6 {
 		t.Fatalf("unexpected usage event %#v", events[2])
 	}
 	if events[3].Type != llm.EventCompleted || events[3].FinishReason != llm.FinishReasonCompleted {
@@ -289,5 +289,29 @@ func TestClientErrorsTellWhetherTheyAreTransient(t *testing.T) {
 				t.Fatalf("error = %#v", err)
 			}
 		})
+	}
+}
+
+// A model reasoning gives its reasoning encrypted, nothing being stored; a
+// model told not to reason, or left to its default, is not asked for it.
+func TestClientAsksForTheEncryptedReasoning(t *testing.T) {
+	for effort, want := range map[string]bool{"": false, "none": false, "low": true} {
+		var body map[string]any
+		server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+			_ = json.NewDecoder(request.Body).Decode(&body)
+			response.Header().Set("Content-Type", "text/event-stream")
+			_, _ = fmt.Fprint(response, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2},\"output\":[]}}\n\n")
+		}))
+		client, err := New(Config{BaseURL: server.URL + "/v1", Model: "test-model", AuthMode: AuthModeNone, Timeout: time.Minute, MaxOutputTokens: 1024, ReasoningEffort: effort}, server.Client())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := client.Stream(t.Context(), llm.Request{Messages: []llm.Message{{Role: llm.RoleUser, Text: "health"}}}, func(llm.Event) error { return nil }); err != nil {
+			t.Fatalf("effort %q: %v", effort, err)
+		}
+		server.Close()
+		if got := fmt.Sprint(body["include"]) == "["+includeReasoning+"]"; got != want || body["store"] != false {
+			t.Fatalf("effort %q: include = %v, store = %v", effort, body["include"], body["store"])
+		}
 	}
 }

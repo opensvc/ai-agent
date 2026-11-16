@@ -231,6 +231,8 @@ func streamRun(response http.ResponseWriter, request *http.Request, audit auditL
 				slog.Int64("input_tokens", event.Usage.InputTokens),
 				slog.Int64("output_tokens", event.Usage.OutputTokens),
 				slog.Int64("total_tokens", event.Usage.TotalTokens),
+				slog.Int64("cache_read_tokens", event.Usage.CacheReadTokens),
+				slog.Int64("cache_write_tokens", event.Usage.CacheWriteTokens),
 				slog.Int64("duration_ms", event.ModelDuration.Milliseconds()),
 				slog.Int64("first_event_ms", event.ModelFirstEvent.Milliseconds()),
 			)

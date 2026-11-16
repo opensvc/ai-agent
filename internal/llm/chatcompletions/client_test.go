@@ -39,7 +39,7 @@ func TestClientStreamsTextUsageAndCompletion(t *testing.T) {
 		_, _ = fmt.Fprint(response, "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"cluster \"},\"finish_reason\":null}]}\n\n")
 		_, _ = fmt.Fprint(response, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"healthy\"},\"finish_reason\":null}]}\n\n")
 		_, _ = fmt.Fprint(response, "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
-		_, _ = fmt.Fprint(response, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":2,\"total_tokens\":12}}\n\n")
+		_, _ = fmt.Fprint(response, "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":2,\"total_tokens\":12,\"prompt_tokens_details\":{\"cached_tokens\":4}}}\n\n")
 		_, _ = fmt.Fprint(response, "data: [DONE]\n\n")
 	}))
 	t.Cleanup(server.Close)
@@ -59,7 +59,7 @@ func TestClientStreamsTextUsageAndCompletion(t *testing.T) {
 	if events[0].TextDelta+events[1].TextDelta != "cluster healthy" {
 		t.Fatalf("unexpected text events %#v", events[:2])
 	}
-	if events[2].Type != llm.EventUsage || events[2].Usage.TotalTokens != 12 {
+	if events[2].Type != llm.EventUsage || events[2].Usage.TotalTokens != 12 || events[2].Usage.CacheReadTokens != 4 {
 		t.Fatalf("unexpected usage event %#v", events[2])
 	}
 	if events[3].Type != llm.EventCompleted || events[3].FinishReason != llm.FinishReasonCompleted {

@@ -17,6 +17,9 @@ type createRequest struct {
 	MaxOutputTokens int            `json:"max_output_tokens"`
 	// Reasoning is left out unless configured: the model applies its own.
 	Reasoning *reasoning `json:"reasoning,omitempty"`
+	// Include asks for the encrypted reasoning of the model, which the next
+	// requests of the turn give back, nothing being stored.
+	Include []string `json:"include,omitempty"`
 }
 
 // reasoning is the reasoning effort a request asks for.
@@ -55,12 +58,36 @@ type toolOutput struct {
 }
 
 func newCreateRequest(model string, maxOutputTokens int, request llm.Request) (createRequest, error) {
+	return buildCreateRequest(model, maxOutputTokens, request, true)
+}
+
+// buildCreateRequest gives back the reasoning of the answers of the turn,
+// in the order of their output, when replay is set.
+func buildCreateRequest(model string, maxOutputTokens int, request llm.Request, replay bool) (createRequest, error) {
 	wire := createRequest{Model: model, Stream: true, Store: false, MaxOutputTokens: maxOutputTokens}
 	for _, message := range request.Messages {
 		switch message.Role {
 		case llm.RoleSystem, llm.RoleUser:
 			wire.Input = append(wire.Input, inputMessage{Role: string(message.Role), Content: message.Text})
 		case llm.RoleAssistant:
+			if order := replayOrder(message); replay && order != nil {
+				calls := make(map[string]llm.ToolCall, len(message.ToolCalls))
+				for _, call := range message.ToolCalls {
+					calls[call.ID] = call
+				}
+				for _, item := range order {
+					switch {
+					case item.Reasoning != nil:
+						wire.Input = append(wire.Input, item.Reasoning)
+					case item.Message:
+						wire.Input = append(wire.Input, inputMessage{Role: string(message.Role), Content: message.Text})
+					default:
+						call := calls[item.CallID]
+						wire.Input = append(wire.Input, functionCallInput{Type: "function_call", CallID: call.ID, Name: call.Name, Arguments: string(call.Arguments)})
+					}
+				}
+				continue
+			}
 			if message.Text != "" {
 				wire.Input = append(wire.Input, inputMessage{Role: string(message.Role), Content: message.Text})
 			}

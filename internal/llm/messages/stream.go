@@ -34,6 +34,8 @@ type streamEvent struct {
 	Delta        *struct {
 		Type        string  `json:"type"`
 		Text        string  `json:"text"`
+		Thinking    string  `json:"thinking"`
+		Signature   string  `json:"signature"`
 		PartialJSON string  `json:"partial_json"`
 		StopReason  *string `json:"stop_reason"`
 	} `json:"delta"`
@@ -54,10 +56,15 @@ type pendingBlock struct {
 	block     wireBlock
 	arguments []byte
 	closed    bool
+	// text, thinking and signature accumulate the deltas of the block, for
+	// the reasoning of the answer to give it back as the model gave it.
+	text, thinking, signature []byte
 }
 
 type streamState struct {
-	emit                                    llm.EmitFunc
+	emit llm.EmitFunc
+	// fingerprint is that of the request, which its thinking is bound to.
+	fingerprint                             string
 	started                                 bool
 	finishing                               bool
 	stopped                                 bool
@@ -68,11 +75,11 @@ type streamState struct {
 	input, output, cacheCreation, cacheRead int64
 }
 
-func consumeStream(reader io.Reader, emit llm.EmitFunc) error {
+func consumeStream(reader io.Reader, fingerprint string, emit llm.EmitFunc) error {
 	limited := &io.LimitedReader{R: reader, N: maxStreamBytes + 1}
 	scanner := bufio.NewScanner(limited)
 	scanner.Buffer(make([]byte, 64<<10), maxLineBytes)
-	state := streamState{emit: emit, callIDs: make(map[string]struct{})}
+	state := streamState{emit: emit, fingerprint: fingerprint, callIDs: make(map[string]struct{})}
 	var data bytes.Buffer
 	var eventName string
 	dispatch := func() error {
@@ -165,8 +172,8 @@ func (s *streamState) consume(data []byte, eventName string) error {
 		case "text":
 		case "thinking", "redacted_thinking":
 			// The reasoning of the model, adaptive by default on the recent
-			// models: never shown nor replayed, as the chain of thought of the
-			// model is not given to the client.
+			// models: never shown to the client, given back to the model in
+			// the next requests of the turn.
 		case "tool_use":
 			if s.calls >= maxToolCalls {
 				return fmt.Errorf("Messages tool call count exceeds %d", maxToolCalls)
@@ -183,7 +190,11 @@ func (s *streamState) consume(data []byte, eventName string) error {
 			return fmt.Errorf("unsupported Messages content block (only text, thinking and client tool_use are supported)")
 		}
 		s.blocks = append(s.blocks, pendingBlock{block: block})
+		pending := &s.blocks[len(s.blocks)-1]
+		pending.thinking = append(pending.thinking, block.Thinking...)
+		pending.signature = append(pending.signature, block.Signature...)
 		if block.Type == "text" {
+			pending.text = append(pending.text, block.Text...)
 			return s.emitText(block.Text)
 		}
 	case "content_block_delta", "content_block_stop":
@@ -202,9 +213,15 @@ func (s *streamState) consume(data []byte, eventName string) error {
 			return fmt.Errorf("Messages content delta is missing")
 		}
 		if block.block.Type == "text" && event.Delta.Type == "text_delta" {
+			block.text = append(block.text, event.Delta.Text...)
 			return s.emitText(event.Delta.Text)
 		}
-		if block.block.Type == "thinking" && (event.Delta.Type == "thinking_delta" || event.Delta.Type == "signature_delta") {
+		if block.block.Type == "thinking" && event.Delta.Type == "thinking_delta" {
+			block.thinking = append(block.thinking, event.Delta.Thinking...)
+			return nil
+		}
+		if block.block.Type == "thinking" && event.Delta.Type == "signature_delta" {
+			block.signature = append(block.signature, event.Delta.Signature...)
 			return nil
 		}
 		if block.block.Type != "tool_use" || event.Delta.Type != "input_json_delta" {
@@ -318,7 +335,13 @@ func (s *streamState) complete() error {
 			return err
 		}
 	}
-	if err := s.emitEvent(llm.Event{Type: llm.EventUsage, Usage: &llm.Usage{InputTokens: s.input + s.cacheCreation + s.cacheRead, OutputTokens: s.output, TotalTokens: total}}); err != nil {
+	if reasoning := answerReasoning(s.blocks, s.fingerprint); reasoning != nil {
+		if err := s.emitEvent(llm.Event{Type: llm.EventReasoning, Reasoning: reasoning}); err != nil {
+			return err
+		}
+	}
+	if err := s.emitEvent(llm.Event{Type: llm.EventUsage, Usage: &llm.Usage{InputTokens: s.input + s.cacheCreation + s.cacheRead, OutputTokens: s.output, TotalTokens: total,
+		CacheReadTokens: s.cacheRead, CacheWriteTokens: s.cacheCreation}}); err != nil {
 		return err
 	}
 	return s.emitEvent(llm.Event{Type: llm.EventCompleted, FinishReason: finish})

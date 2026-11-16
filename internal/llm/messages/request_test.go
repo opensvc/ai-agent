@@ -30,7 +30,7 @@ func TestCreateRequestPreservesTextToolsAndResults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if wire.Model != "model" || wire.MaxTokens != 512 || !wire.Stream || wire.System != "instructions\n\nmore instructions" {
+	if wire.Model != "model" || wire.MaxTokens != 512 || !wire.Stream || len(wire.System) != 1 || wire.System[0].Text != "instructions\n\nmore instructions" {
 		t.Fatalf("unexpected request: %#v", wire)
 	}
 	if len(wire.Tools) != 1 || string(wire.Tools[0].InputSchema) != `{"type":"object"}` {
@@ -55,6 +55,58 @@ func TestCreateRequestPreservesTextToolsAndResults(t *testing.T) {
 		if _, exists := fields[field]; exists {
 			t.Fatalf("unexpected field %s", field)
 		}
+	}
+}
+
+// The tools and the system prompt are cached, then the conversation up to
+// its last block: two cache points, of the four a request may hold.
+func TestCreateRequestMarksTheCachePoints(t *testing.T) {
+	user := llm.Message{Role: llm.RoleUser, Text: "health"}
+	call := llm.Message{Role: llm.RoleAssistant, Text: "checking", ToolCalls: []llm.ToolCall{{ID: "call-1", Name: "health", Arguments: json.RawMessage(`{}`)}}}
+	result := llm.Message{Role: llm.RoleTool, ToolResults: []llm.ToolResult{{CallID: "call-1", Content: json.RawMessage(`{}`)}}}
+	for name, messages := range map[string][]llm.Message{
+		"prompt":       {{Role: llm.RoleSystem, Text: "instructions"}, user},
+		"tool results": {{Role: llm.RoleSystem, Text: "instructions"}, user, call, result},
+		"no system":    {user, call, result},
+	} {
+		t.Run(name, func(t *testing.T) {
+			wire, err := newCreateRequest("model", 100, llm.Request{Messages: messages})
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, err := json.Marshal(wire)
+			if err != nil {
+				t.Fatal(err)
+			}
+			marks := strings.Count(string(body), `"cache_control":{"type":"ephemeral"}`)
+			want := 1
+			if len(wire.System) != 0 {
+				want = 2
+				if wire.System[0].CacheControl == nil {
+					t.Fatalf("system not cached: %s", body)
+				}
+			}
+			last := wire.Messages[len(wire.Messages)-1]
+			if marks != want || last.Content[len(last.Content)-1].CacheControl == nil {
+				t.Fatalf("cache points: %s", body)
+			}
+		})
+	}
+}
+
+// The last request of a turn takes no call: its tool_choice invalidates the
+// cache of the conversation, whose tail is not written.
+func TestCreateRequestCachesNoTailOnTheLastRequest(t *testing.T) {
+	wire, err := newCreateRequest("model", 100, llm.Request{Messages: []llm.Message{{Role: llm.RoleSystem, Text: "instructions"}, {Role: llm.RoleUser, Text: "health"}}, NoToolCall: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(body), `"cache_control"`) != 1 || wire.System[0].CacheControl == nil {
+		t.Fatalf("cache points: %s", body)
 	}
 }
 

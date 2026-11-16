@@ -48,7 +48,9 @@ forwards it to the MCP of the backend, whose audit lines carry it too: one ID
 follows a request from the agent to its tool calls.
 
 Each model call of a run has its audit line `llm_usage`: its `iteration`, its
-tokens, and its timing on the clock of the agent, `duration_ms` from the
+tokens, `input_tokens` counting those the provider read from its cache,
+`cache_read_tokens`, and wrote to it, `cache_write_tokens`, 0 when the
+protocol does not tell, and its timing on the clock of the agent, `duration_ms` from the
 request to the usage the provider reports, and `first_event_ms` to the first
 event of its stream, the wait of the provider before it answers. A slow run
 tells there whether the provider or the tools took the time.
@@ -146,6 +148,14 @@ Only one turn runs at a time in a conversation.
   client is shown none of the refused calls; the audit records the answer as
   `tool_calls_refused`, with the `bound` it passed, `answer` or `question`,
   `calls_asked` and `calls_ran`.
+- **Reasoning.** The reasoning of the model, the thinking of the Messages
+  protocol or the encrypted reasoning of the Responses protocol, is given
+  back to the model in the next model calls of the run, never to the client,
+  and never stored: neither the history nor a turn waiting on a
+  confirmation or on the client keeps it, the run that resumes it starting
+  without. A thinking block of the Messages protocol is bound to the system
+  prompt and the tools of its request: once a `search_tools` shows more
+  tools, the thinking before it is left out.
 - **Calls of the agent.** An MCP call the agent makes of its own, not the
   model, such as reading the version of the cluster a documentation search
   is about, is not shown to the client nor counted in `tool_calls`; the
