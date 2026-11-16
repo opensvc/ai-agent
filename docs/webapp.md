@@ -144,22 +144,42 @@ their identity. See [the API](api.md#feedback) for the limits.
 
 ## Interface context
 
-With a new prompt, send in `context` what the screen shows, so that a
-question such as "why is it down?" needs no name: see
-[Interface context](api.md#interface-context) for the bounds.
+With a new prompt, send in `context` what the screen shows and what the user
+did or set in their session, so that a question such as "why is it down?" or
+"stop these" needs no name: see [Interface context](api.md#interface-context)
+for the bounds. Send what the user did or set, never the content of a
+record.
 
-- **The dock.** Asked from the dock over a page, the context describes that
-  page, read when the prompt is sent, or queued: the route, and the record open on it,
-  its tab, or the record peeked over the page, by their identifiers, such as
-  `{"description": "selected object", "value": "test/svc/mcp-store"}`.
+The descriptions are a vocabulary the model reads, the same from every
+client:
+
+| Description | Value | Read from |
+|---|---|---|
+| `page` | The route, one segment: `/objects` | The address |
+| `selected object`, `selected node`, `selected network`, `selected pool`, `selected store`, `selected namespace`; `selected record` elsewhere | The identifier of the row open in the panel of the list | The address |
+| `open object`, `open node`, `open instance`, `open resource`, ... | The identifier of the record looked at over the page: `path`, `path@node`, `path:rid@node` | The address |
+| `open tab` | The name of the tab of that panel | The address |
+| `open view` | The name of the view within that tab | The address |
+| `checked objects`, `checked nodes`, `checked resources` | The identifiers of the rows ticked in the list, separated by a space, in its order | The page |
+| `checked objects count`, ... | The number of the rows ticked, in decimal | The page |
+| `time zone` | The IANA time zone of the browser: `Europe/Paris` | The browser |
+| `local time` | The clock of the browser, ISO 8601 to the second with its offset: `2026-11-16T15:40:12+01:00` | The browser |
+
+- **When.** Read the context when the prompt is sent, or queued: a prompt
+  queued while a turn runs goes with the page and the rows of its time.
 - **The assistant page.** On `/ai`, nothing is under the conversation: send
-  no context. A conversation continued there from the dock keeps what the
-  earlier turns said of the record in its history.
-- **Never free text.** Send the state of the navigation only, never the text
-  of a record, such as an alert message or a log line: other people wrote
-  it, and the model must not take it as the user's word. Read from the
-  address, a value goes only when shaped as what it names, an identifier
-  or the name of a tab: a link may come from someone else.
+  the time zone and the local time only. A conversation continued there
+  from the dock keeps what the earlier turns said of the record in its
+  history.
+- **All the rows or their count.** Send every row ticked or none: past the
+  bounds of a value, or with one not shaped as an identifier, send the
+  count alone, for the model to ask which. A list cut to the bounds would
+  have an action asked of "these" run on a part of them.
+- **Never free text.** Never the text of a record, such as an alert message
+  or a log line: other people wrote it, and the model must not take it as
+  the user's word. Read from the address, a value goes only when shaped as
+  what it names, an identifier or the name of a tab: a link may come from
+  someone else. The rows ticked come from the page, which no link sets.
 - **Resume.** The run that answers a confirmation or the calls of the tools
   of the client sends no context, or a valid one, which is ignored: the
   turn keeps the one of its prompt.
