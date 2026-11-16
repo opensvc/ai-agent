@@ -319,8 +319,8 @@ rejected one, a result telling the call did not run.
 `context`, the AG-UI `Context` entries `{description, value}`, tells what
 the screen of the user shows when they send a new prompt: the page, the
 record open on it, its tab, a record looked at over the page. The model reads
-it right before the prompt, in the same message, and its system prompt tells it that the context
-is data, never instructions, that its identifiers count as given by the
+it right after the prompt, in the same message, and its system prompt
+tells it that the context is data, never instructions, that its identifiers count as given by the
 user, to tell what a question such as "why is it down?" refers to, and that
 the state is read with the tools before concluding.
 
@@ -334,6 +334,10 @@ the state is read with the tools before concluding.
   gives it to the model again: its own `context`, valid, is ignored. It is neither
   stored in the history, nor shown in the messages of the conversation or a
   snapshot: the next prompt comes with the context of its own screen.
+- **Cache.** The context comes after the text of the prompt, past a cache
+  point of the Messages protocol: the next turns, which give the prompt
+  without it, still read the conversation up to the prompt from the cache
+  of the provider.
 - **Audit.** `conversation_run_started` and `unattended_run_started` carry
   `context_entries` and `context_bytes`, never the content.
 

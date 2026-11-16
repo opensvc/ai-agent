@@ -85,13 +85,16 @@ func InterfaceContextFrom(ctx context.Context) []InterfaceEntry {
 }
 
 // promptWithInterfaceContext gives the prompt as the model reads it: the
-// context of the interface first, in the same message, so that the messages
-// keep alternating. JSON escapes < and >: a value cannot close the tag.
+// context of the interface after its text, in the same message, so that the
+// messages keep alternating, as volatile text, so that the next turns, the
+// prompt in their history without it, still read the conversation up to the
+// prompt from the cache of the provider. JSON escapes < and >: a value
+// cannot close the tag.
 func promptWithInterfaceContext(prompt llm.Message, entries []InterfaceEntry) (llm.Message, error) {
 	data, err := json.Marshal(entries)
 	if err != nil {
 		return llm.Message{}, fmt.Errorf("encode the context of the interface: %w", err)
 	}
-	prompt.Text = "<interface_context>\n" + string(data) + "\n</interface_context>\n\n" + prompt.Text
+	prompt.Volatile = "<interface_context>\n" + string(data) + "\n</interface_context>"
 	return prompt, nil
 }

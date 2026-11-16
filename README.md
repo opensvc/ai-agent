@@ -63,8 +63,11 @@ OPENSVC_AI_LLM_API_TOKEN=replace-me
 Messages requests ask the provider to cache, for five minutes, the tools and
 the system prompt, and the conversation up to its last message, which the
 next model call of the turn reads again, but on its last call, which takes
-no tool call and would read it nowhere; the audit line `llm_usage` of each
-call tells the tokens read from and written to the cache.
+no tool call and would read it nowhere. A prompt that comes with the context
+of the interface is cached up to its text, the context after it: the next
+turns, which give the prompt without it, read the conversation up to the
+prompt from the cache. The audit line `llm_usage` of each call tells the
+tokens read from and written to the cache.
 Messages supports streamed text and MCP tool calls, without provider-hosted
 tools. The thinking of a model that thinks by default, such as the recent
 Claude models, is never shown, and counts in

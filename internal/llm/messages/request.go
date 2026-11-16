@@ -112,7 +112,17 @@ func buildCreateRequest(model string, maxTokens int, request llm.Request, replay
 				return createRequest{}, fmt.Errorf("Messages system instructions must precede conversation messages")
 			}
 		case llm.RoleUser:
-			appendMessage("user", []wireBlock{{Type: "text", Text: message.Text}})
+			blocks := []wireBlock{{Type: "text", Text: message.Text}}
+			if message.Volatile != "" {
+				// A cache point before the volatile text: the next requests,
+				// the message given without it, read the prefix up to the
+				// text. None for the last request of a turn, as below.
+				if !request.NoToolCall {
+					blocks[0].CacheControl = &cacheControl{Type: "ephemeral"}
+				}
+				blocks = append(blocks, wireBlock{Type: "text", Text: message.Volatile})
+			}
+			appendMessage("user", blocks)
 		case llm.RoleAssistant:
 			var blocks []wireBlock
 			for _, call := range message.ToolCalls {
@@ -157,9 +167,10 @@ func buildCreateRequest(model string, maxTokens int, request llm.Request, replay
 	if len(result.Messages) == 0 || result.Messages[0].Role != "user" || result.Messages[len(result.Messages)-1].Role != "user" {
 		return createRequest{}, fmt.Errorf("Messages history must begin and end with a user message or tool results")
 	}
-	// Two cache points: the tools and the system prompt, the same for every
-	// request of the backend, and the conversation up to its last message,
-	// which the next request of the turn extends.
+	// Two cache points, three with a volatile text (above): the tools and
+	// the system prompt, the same for every request of the backend, and the
+	// conversation up to its last message, which the next request of the
+	// turn extends.
 	if len(system) != 0 {
 		result.System = []wireBlock{{Type: "text", Text: strings.Join(system, "\n\n"), CacheControl: &cacheControl{Type: "ephemeral"}}}
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 // Validate rejects conversation states that cannot be represented safely by
@@ -28,9 +29,17 @@ func (r Request) Validate() error {
 		}
 	}
 
+	volatile := 0
 	for i, message := range r.Messages {
 		if err := message.validate(); err != nil {
 			return fmt.Errorf("LLM message %d: %w", i, err)
+		}
+		// A message with volatile text takes a cache point of the
+		// provider, which bounds them: one a request.
+		if message.Volatile != "" {
+			if volatile++; volatile > 1 {
+				return fmt.Errorf("LLM message %d carries volatile text, after another one", i)
+			}
 		}
 	}
 	return nil
@@ -39,6 +48,9 @@ func (r Request) Validate() error {
 func (m Message) validate() error {
 	if m.Reasoning != nil && m.Role != RoleAssistant {
 		return fmt.Errorf("%s message carries reasoning", m.Role)
+	}
+	if m.Volatile != "" && (m.Role != RoleUser || !utf8.ValidString(m.Volatile)) {
+		return fmt.Errorf("%s message carries invalid volatile text", m.Role)
 	}
 	switch m.Role {
 	case RoleSystem, RoleUser:

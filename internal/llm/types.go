@@ -33,6 +33,21 @@ type Message struct {
 	// requests of the same turn. It lives as long as the turn runs: never
 	// stored, nor kept when the turn waits on the user.
 	Reasoning *Reasoning `json:"-"`
+	// Volatile is text of a user message the model reads after Text, which
+	// later requests do not repeat, such as what the screen of the user
+	// showed with a prompt. An adapter keeps it out of the prefix it caches,
+	// so that the next requests, the message given without it, still find
+	// the prefix up to Text. One message a request at most. Never stored.
+	Volatile string `json:"-"`
+}
+
+// TextWithVolatile gives the text of a message and its volatile text after
+// it, for a protocol that takes one text per message.
+func (m Message) TextWithVolatile() string {
+	if m.Volatile == "" {
+		return m.Text
+	}
+	return m.Text + "\n\n" + m.Volatile
 }
 
 // MaxReasoningBytes bounds the reasoning of one assistant message.
