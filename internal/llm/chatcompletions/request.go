@@ -69,7 +69,9 @@ func newCreateRequest(model string, maxOutputTokens int, request llm.Request) (c
 	for _, neutralMessage := range request.Messages {
 		switch neutralMessage.Role {
 		case llm.RoleSystem, llm.RoleUser:
-			content := neutralMessage.Text
+			// The prefix of the provider's cache is matched by tokens: the
+			// volatile text after the text leaves the text in it.
+			content := neutralMessage.TextWithVolatile()
 			wire.Messages = append(wire.Messages, message{Role: string(neutralMessage.Role), Content: &content})
 		case llm.RoleAssistant:
 			assistant := message{Role: string(neutralMessage.Role)}

@@ -44,10 +44,11 @@ func TestValidateInterfaceContext(t *testing.T) {
 	}
 }
 
-// The model reads the context of the interface right before the prompt, in
-// its message, so that the messages keep alternating; the history of the
-// turn keeps the prompt only, and a value cannot close the tag the context
-// is read in.
+// The model reads the context of the interface right after the prompt, in
+// its message, so that the messages keep alternating, as volatile text, so
+// that the next turns find the prompt in the cache; the history of the turn
+// keeps the prompt only, and a value cannot close the tag the context is
+// read in.
 func TestInterfaceContextComesWithThePromptOutOfTheHistory(t *testing.T) {
 	var sent []llm.Message
 	model := &scriptedLLM{t: t, steps: []llmStep{func(request llm.Request, emit llm.EmitFunc) error {
@@ -62,9 +63,9 @@ func TestInterfaceContextComesWithThePromptOutOfTheHistory(t *testing.T) {
 	if len(sent) != 4 || sent[1].Text != "list the objects" || sent[3].Role != llm.RoleUser {
 		t.Fatalf("messages = %#v", sent)
 	}
-	block, prompt, found := strings.Cut(sent[3].Text, "\n\n")
-	if !found || prompt != "why is it down?" || !strings.HasPrefix(block, "<interface_context>\n") || !strings.HasSuffix(block, "\n</interface_context>") || strings.Count(sent[3].Text, "</interface_context>") != 1 {
-		t.Fatalf("prompt = %q", sent[3].Text)
+	block := sent[3].Volatile
+	if sent[3].Text != "why is it down?" || !strings.HasPrefix(block, "<interface_context>\n") || !strings.HasSuffix(block, "\n</interface_context>") || strings.Count(block, "</interface_context>") != 1 {
+		t.Fatalf("prompt = %q, volatile %q", sent[3].Text, block)
 	}
 	var decoded []InterfaceEntry
 	if err := json.Unmarshal([]byte(strings.TrimSuffix(strings.TrimPrefix(block, "<interface_context>\n"), "\n</interface_context>")), &decoded); err != nil || decoded[1].Value != screen[1].Value {
@@ -73,7 +74,7 @@ func TestInterfaceContextComesWithThePromptOutOfTheHistory(t *testing.T) {
 	if !strings.Contains(sent[0].Text, interfaceContextInstruction) {
 		t.Fatal("the system prompt does not tell how to read the context")
 	}
-	if len(result.Messages) == 0 || result.Messages[0].Text != "why is it down?" {
+	if len(result.Messages) == 0 || result.Messages[0].Text != "why is it down?" || result.Messages[0].Volatile != "" {
 		t.Fatalf("result = %#v", result.Messages)
 	}
 	for _, message := range result.Messages {
@@ -113,7 +114,7 @@ func TestSuspendedTurnKeepsTheInterfaceContext(t *testing.T) {
 	if _, err := agent.ResumeTurn(other, nil, state, DecisionReject, func(Event) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
-	if len(resumed) < 2 || !strings.Contains(resumed[1].Text, "mcp-store") || strings.Contains(resumed[1].Text, "/ai") || !strings.HasSuffix(resumed[1].Text, "\n\nstop it") {
+	if len(resumed) < 2 || resumed[1].Text != "stop it" || !strings.Contains(resumed[1].Volatile, "mcp-store") || strings.Contains(resumed[1].Volatile, "/ai") {
 		t.Fatalf("resumed messages = %#v", resumed)
 	}
 }

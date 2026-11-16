@@ -94,6 +94,46 @@ func TestCreateRequestMarksTheCachePoints(t *testing.T) {
 	}
 }
 
+// The volatile text of a prompt goes after a cache point, in a block of its
+// own: the next turns, the prompt given without it, read the conversation up
+// to the prompt from the cache. Three cache points then, of four.
+func TestCreateRequestCachesThePromptBeforeItsVolatileText(t *testing.T) {
+	system := llm.Message{Role: llm.RoleSystem, Text: "instructions"}
+	prompt := llm.Message{Role: llm.RoleUser, Text: "why is it down?", Volatile: "<interface_context>[]</interface_context>"}
+	call := llm.Message{Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "call-1", Name: "health", Arguments: json.RawMessage(`{}`)}}}
+	result := llm.Message{Role: llm.RoleTool, ToolResults: []llm.ToolResult{{CallID: "call-1", Content: json.RawMessage(`{}`)}}}
+	for name, messages := range map[string][]llm.Message{
+		"first request": {system, prompt},
+		"tool results":  {system, prompt, call, result},
+	} {
+		t.Run(name, func(t *testing.T) {
+			wire, err := newCreateRequest("model", 100, llm.Request{Messages: messages})
+			if err != nil {
+				t.Fatal(err)
+			}
+			body, err := json.Marshal(wire)
+			if err != nil {
+				t.Fatal(err)
+			}
+			blocks := wire.Messages[0].Content
+			if len(blocks) != 2 || blocks[0].Text != prompt.Text || blocks[0].CacheControl == nil || blocks[1].Text != prompt.Volatile {
+				t.Fatalf("prompt blocks: %s", body)
+			}
+			last := wire.Messages[len(wire.Messages)-1]
+			if strings.Count(string(body), `"cache_control"`) != 3 || last.Content[len(last.Content)-1].CacheControl == nil {
+				t.Fatalf("cache points: %s", body)
+			}
+		})
+	}
+	wire, err := newCreateRequest("model", 100, llm.Request{Messages: []llm.Message{system, prompt}, NoToolCall: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body, _ := json.Marshal(wire); strings.Count(string(body), `"cache_control"`) != 1 || len(wire.Messages[0].Content) != 2 {
+		t.Fatalf("the last request caches the prompt: %s", body)
+	}
+}
+
 // The last request of a turn takes no call: its tool_choice invalidates the
 // cache of the conversation, whose tail is not written.
 func TestCreateRequestCachesNoTailOnTheLastRequest(t *testing.T) {

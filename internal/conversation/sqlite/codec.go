@@ -58,6 +58,10 @@ func encodeMessages(messages []llm.Message) ([]encodedMessage, int64, error) {
 		if message.Reasoning != nil {
 			return nil, 0, fmt.Errorf("conversation message %d contains the reasoning of the model", index)
 		}
+		// Volatile text lives as long as the requests that carry it.
+		if message.Volatile != "" {
+			return nil, 0, fmt.Errorf("conversation message %d contains volatile text", index)
+		}
 		if len(message.ToolCalls) > maxStoredToolCallsPerMessage || len(message.ToolResults) > maxStoredToolCallsPerMessage {
 			return nil, 0, fmt.Errorf("conversation message %d contains too many tool items", index)
 		}

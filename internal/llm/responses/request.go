@@ -68,7 +68,9 @@ func buildCreateRequest(model string, maxOutputTokens int, request llm.Request, 
 	for _, message := range request.Messages {
 		switch message.Role {
 		case llm.RoleSystem, llm.RoleUser:
-			wire.Input = append(wire.Input, inputMessage{Role: string(message.Role), Content: message.Text})
+			// The prefix of the provider's cache is matched by tokens: the
+			// volatile text after the text leaves the text in it.
+			wire.Input = append(wire.Input, inputMessage{Role: string(message.Role), Content: message.TextWithVolatile()})
 		case llm.RoleAssistant:
 			if order := replayOrder(message); replay && order != nil {
 				calls := make(map[string]llm.ToolCall, len(message.ToolCalls))

@@ -218,6 +218,11 @@ func TestStoreHoldsTheToolCallsOfOneAnswer(t *testing.T) {
 	if _, _, err := encodeMessages(batch(maxStoredToolCallsPerMessage + 1)); err == nil {
 		t.Fatal("too many calls accepted")
 	}
+	// Volatile text, such as the context of the interface, lives as long
+	// as the requests that carry it.
+	if _, _, err := encodeMessages([]llm.Message{{Role: llm.RoleUser, Text: "status", Volatile: "screen"}, {Role: llm.RoleAssistant, Text: "done"}}); err == nil {
+		t.Fatal("volatile text stored")
+	}
 	if maxStoredToolCallsPerMessage != 8 {
 		t.Fatalf("stored calls per message = %d, the agent runs 8 per answer", maxStoredToolCallsPerMessage)
 	}

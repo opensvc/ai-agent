@@ -40,6 +40,12 @@ func TestRequestValidate(t *testing.T) {
 		}, want: "contains tool content"},
 		{name: "invalid arguments", mutate: func(r *Request) { r.Messages[2].ToolCalls[0].Arguments = json.RawMessage(`[]`) }, want: "arguments"},
 		{name: "invalid result", mutate: func(r *Request) { r.Messages[3].ToolResults[0].Content = json.RawMessage(`invalid`) }, want: "valid JSON"},
+		{name: "volatile system text", mutate: func(r *Request) { r.Messages[0].Volatile = "screen" }, want: "volatile"},
+		{name: "invalid volatile text", mutate: func(r *Request) { r.Messages[1].Volatile = "\xff" }, want: "volatile"},
+		{name: "two volatile texts", mutate: func(r *Request) {
+			r.Messages[1].Volatile = "screen"
+			r.Messages = append(r.Messages, Message{Role: RoleAssistant, Text: "done"}, Message{Role: RoleUser, Text: "next", Volatile: "screen"})
+		}, want: "after another one"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			request := cloneRequest(valid)

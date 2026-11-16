@@ -144,6 +144,18 @@ func TestNewCreateRequestMapsConversation(t *testing.T) {
 	}
 }
 
+// The volatile text of a prompt goes after its text: the prefix the provider
+// caches by tokens still holds the text for the next requests.
+func TestNewCreateRequestPutsVolatileTextAfterTheText(t *testing.T) {
+	wire, err := newCreateRequest("test-model", 512, llm.Request{Messages: []llm.Message{{Role: llm.RoleUser, Text: "health", Volatile: "<interface_context>[]</interface_context>"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(wire.Messages) != 1 || wire.Messages[0].Content == nil || *wire.Messages[0].Content != "health\n\n<interface_context>[]</interface_context>" {
+		t.Fatalf("messages = %#v", wire.Messages)
+	}
+}
+
 func TestClientRejectsProviderAndStreamErrorsWithoutExposingToken(t *testing.T) {
 	const token = "redaction-marker"
 	for _, test := range []struct {
