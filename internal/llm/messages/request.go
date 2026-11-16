@@ -12,7 +12,7 @@ type createRequest struct {
 	Model     string        `json:"model"`
 	MaxTokens int           `json:"max_tokens"`
 	Stream    bool          `json:"stream"`
-	System    string        `json:"system,omitempty"`
+	System    []wireBlock   `json:"system,omitempty"`
 	Messages  []wireMessage `json:"messages"`
 	Tools     []wireTool    `json:"tools,omitempty"`
 	// ToolChoice is set to none only: auto is the default.
@@ -37,6 +37,14 @@ type wireBlock struct {
 	ToolUseID string          `json:"tool_use_id,omitempty"`
 	Content   string          `json:"content,omitempty"`
 	IsError   bool            `json:"is_error,omitempty"`
+	// CacheControl marks the end of a prefix the provider caches.
+	CacheControl *cacheControl `json:"cache_control,omitempty"`
+}
+
+// cacheControl asks the provider to cache the prompt up to its block, for
+// five minutes: the tools and the system prompt, then the conversation.
+type cacheControl struct {
+	Type string `json:"type"`
 }
 
 type wireTool struct {
@@ -103,7 +111,17 @@ func newCreateRequest(model string, maxTokens int, request llm.Request) (createR
 	if len(result.Messages) == 0 || result.Messages[0].Role != "user" || result.Messages[len(result.Messages)-1].Role != "user" {
 		return createRequest{}, fmt.Errorf("Messages history must begin and end with a user message or tool results")
 	}
-	result.System = strings.Join(system, "\n\n")
+	// Two cache points: the tools and the system prompt, the same for every
+	// request of the backend, and the conversation up to its last message,
+	// which the next request of the turn extends.
+	if len(system) != 0 {
+		result.System = []wireBlock{{Type: "text", Text: strings.Join(system, "\n\n"), CacheControl: &cacheControl{Type: "ephemeral"}}}
+	}
+	// The last request of a turn, without tool calls, invalidates the cache
+	// of the conversation: its tail would be written and never read.
+	if last := &result.Messages[len(result.Messages)-1]; len(last.Content) != 0 && !request.NoToolCall {
+		last.Content[len(last.Content)-1].CacheControl = &cacheControl{Type: "ephemeral"}
+	}
 	for _, tool := range request.Tools {
 		result.Tools = append(result.Tools, wireTool{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema})
 	}

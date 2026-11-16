@@ -122,8 +122,11 @@ func (e Event) Validate() error {
 		if e.Usage == nil {
 			return fmt.Errorf("usage event has no counters")
 		}
-		if e.Usage.InputTokens < 0 || e.Usage.OutputTokens < 0 || e.Usage.TotalTokens < 0 {
+		if e.Usage.InputTokens < 0 || e.Usage.OutputTokens < 0 || e.Usage.TotalTokens < 0 || e.Usage.CacheReadTokens < 0 || e.Usage.CacheWriteTokens < 0 {
 			return fmt.Errorf("usage event contains negative counters")
+		}
+		if e.Usage.CacheReadTokens > e.Usage.InputTokens || e.Usage.CacheWriteTokens > e.Usage.InputTokens-e.Usage.CacheReadTokens {
+			return fmt.Errorf("usage event counts more cached tokens than input tokens")
 		}
 		if e.TextDelta != "" || e.ToolCall != nil || e.FinishReason != "" {
 			return fmt.Errorf("usage event contains unrelated fields")

@@ -28,7 +28,9 @@ func TestRunTurnWithMessagesToolLoopAndNeutralHistory(t *testing.T) {
 			t.Error("provider credentials and OpenSVC credentials were not isolated")
 		}
 		var request struct {
-			System   string `json:"system"`
+			System []struct {
+				Text string `json:"text"`
+			} `json:"system"`
 			Messages []struct {
 				Role    string `json:"role"`
 				Content []struct {
@@ -45,7 +47,7 @@ func TestRunTurnWithMessagesToolLoopAndNeutralHistory(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		if request.System != testSystemPrompt+"\n"+noPendingConfirmation || len(request.Tools) != 1 || request.Tools[0].Name != "get_cluster_health" {
+		if len(request.System) != 1 || request.System[0].Text != testSystemPrompt+"\n"+noPendingConfirmation || len(request.Tools) != 1 || request.Tools[0].Name != "get_cluster_health" {
 			t.Error("missing system instructions or MCP tools")
 		}
 		position := requests.Add(1)

@@ -318,7 +318,8 @@ func (s *streamState) complete() error {
 			return err
 		}
 	}
-	if err := s.emitEvent(llm.Event{Type: llm.EventUsage, Usage: &llm.Usage{InputTokens: s.input + s.cacheCreation + s.cacheRead, OutputTokens: s.output, TotalTokens: total}}); err != nil {
+	if err := s.emitEvent(llm.Event{Type: llm.EventUsage, Usage: &llm.Usage{InputTokens: s.input + s.cacheCreation + s.cacheRead, OutputTokens: s.output, TotalTokens: total,
+		CacheReadTokens: s.cacheRead, CacheWriteTokens: s.cacheCreation}}); err != nil {
 		return err
 	}
 	return s.emitEvent(llm.Event{Type: llm.EventCompleted, FinishReason: finish})

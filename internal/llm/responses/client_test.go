@@ -41,7 +41,7 @@ func TestClientStreamsTextAndUsage(t *testing.T) {
 		response.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 		_, _ = fmt.Fprint(response, "event: response.output_text.delta\r\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"cluster \"}\r\n\r\n")
 		_, _ = fmt.Fprint(response, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"healthy\"}\r\n\r\n")
-		_, _ = fmt.Fprint(response, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":2,\"total_tokens\":12},\"output\":[]}}\r\n\r\n")
+		_, _ = fmt.Fprint(response, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":2,\"total_tokens\":12,\"input_tokens_details\":{\"cached_tokens\":6}},\"output\":[]}}\r\n\r\n")
 	}))
 	t.Cleanup(server.Close)
 
@@ -60,7 +60,7 @@ func TestClientStreamsTextAndUsage(t *testing.T) {
 	if events[0].TextDelta+events[1].TextDelta != "cluster healthy" {
 		t.Fatalf("unexpected text events %#v", events[:2])
 	}
-	if events[2].Type != llm.EventUsage || events[2].Usage.TotalTokens != 12 {
+	if events[2].Type != llm.EventUsage || events[2].Usage.TotalTokens != 12 || events[2].Usage.CacheReadTokens != 6 {
 		t.Fatalf("unexpected usage event %#v", events[2])
 	}
 	if events[3].Type != llm.EventCompleted || events[3].FinishReason != llm.FinishReasonCompleted {

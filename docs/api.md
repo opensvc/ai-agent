@@ -48,7 +48,9 @@ forwards it to the MCP of the backend, whose audit lines carry it too: one ID
 follows a request from the agent to its tool calls.
 
 Each model call of a run has its audit line `llm_usage`: its `iteration`, its
-tokens, and its timing on the clock of the agent, `duration_ms` from the
+tokens, `input_tokens` counting those the provider read from its cache,
+`cache_read_tokens`, and wrote to it, `cache_write_tokens`, 0 when the
+protocol does not tell, and its timing on the clock of the agent, `duration_ms` from the
 request to the usage the provider reports, and `first_event_ms` to the first
 event of its stream, the wait of the provider before it answers. A slow run
 tells there whether the provider or the tools took the time.

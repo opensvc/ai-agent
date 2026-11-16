@@ -61,7 +61,7 @@ func TestStreamTextAndCumulativeUsage(t *testing.T) {
 	}
 	want := []llm.Event{
 		{Type: llm.EventTextDelta, TextDelta: "OK"},
-		{Type: llm.EventUsage, Usage: &llm.Usage{InputTokens: 17, OutputTokens: 5, TotalTokens: 22}},
+		{Type: llm.EventUsage, Usage: &llm.Usage{InputTokens: 17, OutputTokens: 5, TotalTokens: 22, CacheReadTokens: 4, CacheWriteTokens: 3}},
 		{Type: llm.EventCompleted, FinishReason: llm.FinishReasonCompleted},
 	}
 	if !reflect.DeepEqual(events, want) {

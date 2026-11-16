@@ -72,10 +72,15 @@ type Event struct {
 }
 
 // Usage reports the common token counters exposed by LLM protocols.
+// InputTokens counts every input token, those read from or written to the
+// cache of the provider included; CacheReadTokens and CacheWriteTokens tell
+// how many of them were, 0 when the protocol does not say.
 type Usage struct {
-	InputTokens  int64
-	OutputTokens int64
-	TotalTokens  int64
+	InputTokens      int64
+	OutputTokens     int64
+	TotalTokens      int64
+	CacheReadTokens  int64
+	CacheWriteTokens int64
 }
 
 type FinishReason string

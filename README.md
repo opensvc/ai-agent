@@ -60,6 +60,11 @@ OPENSVC_AI_LLM_API_TOKEN=replace-me
 ```
 
 `api_key` sends `x-api-key`; `bearer` remains available for Messages endpoints.
+Messages requests ask the provider to cache, for five minutes, the tools and
+the system prompt, and the conversation up to its last message, which the
+next model call of the turn reads again, but on its last call, which takes
+no tool call and would read it nowhere; the audit line `llm_usage` of each
+call tells the tokens read from and written to the cache.
 Messages supports streamed text and MCP tool calls, without provider-hosted
 tools. The thinking of a model that thinks by default, such as the recent
 Claude models, is neither shown nor given back to the model in the next

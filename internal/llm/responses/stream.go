@@ -234,9 +234,12 @@ type wireItem struct {
 }
 
 type wireUsage struct {
-	InputTokens  int64 `json:"input_tokens"`
-	OutputTokens int64 `json:"output_tokens"`
-	TotalTokens  int64 `json:"total_tokens"`
+	InputTokens        int64 `json:"input_tokens"`
+	OutputTokens       int64 `json:"output_tokens"`
+	TotalTokens        int64 `json:"total_tokens"`
+	InputTokensDetails struct {
+		CachedTokens int64 `json:"cached_tokens"`
+	} `json:"input_tokens_details"`
 }
 
 type responseEvent struct {
@@ -307,7 +310,11 @@ func (s *streamState) emitUsage(usage *wireUsage) error {
 	if usage == nil {
 		return nil
 	}
-	return s.emitEvent(llm.Event{Type: llm.EventUsage, Usage: &llm.Usage{InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, TotalTokens: usage.TotalTokens}})
+	// The tokens read from the cache are counted in the input; a compatible
+	// endpoint counting more is not believed beyond it.
+	cached := min(max(usage.InputTokensDetails.CachedTokens, 0), max(usage.InputTokens, 0))
+	return s.emitEvent(llm.Event{Type: llm.EventUsage, Usage: &llm.Usage{InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, TotalTokens: usage.TotalTokens,
+		CacheReadTokens: cached}})
 }
 
 func (s *streamState) emitEvent(event llm.Event) error {
