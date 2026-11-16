@@ -227,3 +227,42 @@ func TestNewValidatesConfiguration(t *testing.T) {
 		}
 	}
 }
+
+// An overloaded or rate-limited provider may answer a later request: the
+// agent sends it again after the wait the provider asks for.
+func TestClientErrorsTellWhetherTheyAreTransient(t *testing.T) {
+	for name, test := range map[string]struct {
+		status     int
+		retryAfter string
+		body       string
+		transient  bool
+		wait       time.Duration
+	}{
+		"overloaded":     {529, "", `{"error":{"type":"overloaded_error"}}`, true, 0},
+		"rate limited":   {429, "7", `{"error":{"type":"rate_limit_error"}}`, true, 7 * time.Second},
+		"refused":        {400, "7", `{"error":{"type":"invalid_request_error"}}`, false, 7 * time.Second},
+		"stream error":   {200, "", "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\"}}\n\n", true, 0},
+		"stream refusal": {200, "", "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\"}}\n\n", false, 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if test.status == http.StatusOK {
+					w.Header().Set("Content-Type", "text/event-stream")
+				}
+				if test.retryAfter != "" {
+					w.Header().Set("Retry-After", test.retryAfter)
+				}
+				w.WriteHeader(test.status)
+				_, _ = io.WriteString(w, test.body)
+			}))
+			t.Cleanup(server.Close)
+			client := newTestClient(t, server.URL, AuthModeAPIKey, func() (string, error) { return "test-secret", nil }, server.Client())
+			err := client.Stream(t.Context(), testRequest(), func(llm.Event) error { return nil })
+			var provider *llm.ProviderError
+			if !errors.As(err, &provider) || provider.Transient != test.transient || provider.RetryAfter != test.wait {
+				t.Fatalf("error = %#v", err)
+			}
+		})
+	}
+}

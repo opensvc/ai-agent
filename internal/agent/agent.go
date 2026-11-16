@@ -573,12 +573,14 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 		request := llm.Request{Messages: messages, Tools: requestTools, NoToolCall: lastCall}
 		// The model call is timed on the clock of the agent: until its first
 		// event, the wait of the provider, and until its usage, the whole call.
-		modelStart := time.Now()
-		var firstEvent time.Duration
+		var (
+			modelStart time.Time
+			firstEvent time.Duration
+		)
 		// The calls past the bound of an answer are counted, not kept: the
 		// answer is refused as a whole, with its size.
 		extraCalls := 0
-		if err := a.llm.Stream(llmContext, request, func(event llm.Event) error {
+		consumeModel := func(event llm.Event) error {
 			if err := event.Validate(); err != nil {
 				return fmt.Errorf("validate LLM event: %w", err)
 			}
@@ -608,8 +610,26 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 				finishReason = event.FinishReason
 			}
 			return nil
-		}); err != nil {
-			return result, fmt.Errorf("run LLM iteration %d: %w", iteration, err)
+		}
+		// A request that failed of a transient error of the provider before
+		// any event, such as an overload, is sent again: the turn keeps the
+		// calls it ran, such as an action the user confirmed.
+		for attempt := 0; ; attempt++ {
+			modelStart, firstEvent = time.Now(), 0
+			err := a.llm.Stream(llmContext, request, consumeModel)
+			if err == nil {
+				break
+			}
+			retry, ok := modelRetry(ctx, err, attempt)
+			if firstEvent != 0 || !ok {
+				return result, fmt.Errorf("run LLM iteration %d: %w", iteration, err)
+			}
+			if err := emitAgentEvent(emit, Event{Type: EventModelRetried, Retry: &retry, Iteration: iteration}); err != nil {
+				return result, err
+			}
+			if err := waitModelRetry(ctx, retry.Wait); err != nil {
+				return result, fmt.Errorf("run LLM iteration %d: %w", iteration, err)
+			}
 		}
 		if !completion {
 			return result, fmt.Errorf("LLM iteration %d ended without completion", iteration)

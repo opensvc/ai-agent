@@ -53,6 +53,19 @@ request to the usage the provider reports, and `first_event_ms` to the first
 event of its stream, the wait of the provider before it answers. A slow run
 tells there whether the provider or the tools took the time.
 
+A model request the provider fails for a transient reason before it gives
+any event, an overload, a rate limit, an error of its own or a timeout
+(HTTP 408, 429, 500, 502, 503, 504 or 529, or an `overloaded_error`,
+`rate_limit_error` or `api_error` of the stream of the Messages protocol), is
+sent again, twice at most, after the wait the provider asks for with
+`Retry-After`, else 1 then 4 seconds: the run keeps the tool calls it made,
+such as an action the user confirmed. A wait over 20 s, a request that
+would start less than 10 s before the timeout of the run, a spent quota
+(`insufficient_quota`) or a request that gave an event, such as text the
+client was shown, fail the run as before. Each request sent again has its
+audit line `llm_retried`: its `iteration`, its `attempt`, the HTTP `status`
+of the failure, 0 for an error of the stream, and its `wait_ms`.
+
 `GET /openapi.json` returns the OpenAPI 3.1 description of these routes, their
 bodies, errors and stream events, without authentication. The source is
 `internal/api/openapi.json`, embedded in the binary; a test keeps its routes

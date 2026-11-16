@@ -174,7 +174,13 @@ func messagesEndpoint(baseURL string) (string, error) {
 
 // Provider error bodies can echo credentials or conversation content. Only
 // known error types and the HTTP status are retained, never their messages.
+// A transient status, such as 429 or 529, may be retried.
 func readAPIError(response *http.Response) error {
+	return &llm.ProviderError{Err: readAPIErrorBody(response), Status: response.StatusCode,
+		Transient: llm.TransientStatus(response.StatusCode), RetryAfter: llm.RetryAfter(response.Header, time.Now())}
+}
+
+func readAPIErrorBody(response *http.Response) error {
 	data, err := io.ReadAll(io.LimitReader(response.Body, maxErrorBodyBytes+1))
 	if err != nil {
 		return fmt.Errorf("Messages API returned HTTP %d", response.StatusCode)

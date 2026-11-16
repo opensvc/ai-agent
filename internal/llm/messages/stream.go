@@ -140,7 +140,11 @@ func (s *streamState) consume(data []byte, eventName string) error {
 		if event.Error == nil {
 			return fmt.Errorf("Messages stream returned a provider error")
 		}
-		return fmt.Errorf("Messages stream returned %s", safeErrorType(event.Error.Type))
+		// An overloaded, rate-limited or failing provider may answer a later
+		// request, which the agent sends when this one gave no event.
+		errorType := safeErrorType(event.Error.Type)
+		transient := errorType == "overloaded_error" || errorType == "api_error" || errorType == "rate_limit_error"
+		return &llm.ProviderError{Err: fmt.Errorf("Messages stream returned %s", errorType), Transient: transient}
 	}
 	if event.Type == "ping" {
 		return nil

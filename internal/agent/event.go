@@ -30,6 +30,9 @@ const (
 	// its own, not the model, such as the read of the version of the cluster
 	// a documentation search is about: for the audit, not for the client.
 	EventAgentToolCalled EventType = "agent_tool_called"
+	// EventModelRetried reports a model request sent again after a transient
+	// failure of the provider: for the audit, not for the client.
+	EventModelRetried EventType = "model_retried"
 )
 
 type Event struct {
@@ -61,6 +64,8 @@ type Event struct {
 	Refused *RefusedCalls
 	// AgentCall describes the call of an agent_tool_called event.
 	AgentCall *AgentCall
+	// Retry describes the request sent again of a model_retried event.
+	Retry *ModelRetry
 	// ModelDuration and ModelFirstEvent time the model call of a usage
 	// event, on the clock of the agent: from the request to the usage, and
 	// to the first event of its stream.
@@ -137,6 +142,12 @@ func (e Event) Validate() error {
 		if c == nil || c.Tool == "" || c.Purpose == "" || c.Duration < 0 ||
 			e.TextDelta != "" || e.ToolName != "" || e.Usage != nil || e.FinishReason != "" || e.ToolError {
 			return fmt.Errorf("invalid agent tool called event")
+		}
+	case EventModelRetried:
+		r := e.Retry
+		if r == nil || r.Attempt <= 0 || r.Status < 0 || r.Wait < 0 ||
+			e.TextDelta != "" || e.ToolName != "" || e.Usage != nil || e.FinishReason != "" || e.ToolError {
+			return fmt.Errorf("invalid model retried event")
 		}
 	default:
 		return fmt.Errorf("unsupported agent event type %q", e.Type)
