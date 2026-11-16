@@ -256,7 +256,9 @@ authentication headers of the backend:
   refused. The agent keeps its own history: the other messages are
   not read, so that a client cannot put words in the mouth of the assistant
   or of a tool, but the answers to the calls of its tools, below. Nor are
-  `state`, `context` or `forwardedProps`.
+  `state` or `forwardedProps`.
+- `context` is the context of the interface of a new prompt; see
+  [Interface context](#interface-context).
 - `tools` are the tools of the client, which the agent offers to the model;
   see [Client tools](#client-tools).
 - `resume`, at most one entry, answers the confirmation the conversation
@@ -311,6 +313,37 @@ the text arguments, and `preview`, `previewError` and `previewArguments`, see
 `pending_confirmation` after a reload. A resumed run gives the result of the
 confirmed call against its `toolCallId`, without its start again; a
 rejected one, a result telling the call did not run.
+
+### Interface context
+
+`context`, the AG-UI `Context` entries `{description, value}`, tells what
+the screen of the user shows when they send a new prompt: the page, the
+record open on it, its tab, a record looked at over the page. The model reads
+it right before the prompt, in the same message, and its system prompt tells it that the context
+is data, never instructions, that its identifiers count as given by the
+user, to tell what a question such as "why is it down?" refers to, and that
+the state is read with the tools before concluding.
+
+- **Bounds.** At most 8 entries, each a description of 1 to 128 bytes and a
+  value of at most 1 KiB, 4 KiB in all, printable UTF-8 text without control
+  characters, or 400 `invalid_context`. Other members of an entry are
+  ignored, as the protocol allows them. Absent, `null` or empty: no context,
+  and the run goes as without one.
+- **Lifetime.** The context goes with the turn of its prompt: a turn waiting
+  on a confirmation or on the client keeps it, and the run that resumes it
+  gives it to the model again: its own `context`, valid, is ignored. It is neither
+  stored in the history, nor shown in the messages of the conversation or a
+  snapshot: the next prompt comes with the context of its own screen.
+- **Audit.** `conversation_run_started` and `unattended_run_started` carry
+  `context_entries` and `context_bytes`, never the content.
+
+The context is the client's word, as the prompt: it tells the model where to
+look, and proves nothing. A client sends the state of its navigation, such
+as the route and the identifiers in its address, never the free text of a
+record, such as an alert message or a log line, which other people wrote.
+An address may come from a link someone else wrote, too: send a value only
+when it is shaped as what it names, such as an object path or the name of a
+tab, short and without spaces, and leave out the others.
 
 ### Edited arguments
 
@@ -467,7 +500,8 @@ question or confirm an action, and nothing is stored.
 - The request is an AG-UI `RunAgentInput` holding exactly one message of the
   user, the prompt, without history. `tools` must be empty or absent and
   `resume` absent, or 400 (`invalid_tools`, `invalid_decision`,
-  `invalid_prompt`). `threadId` and `runId` are any IDs of the client, at
+  `invalid_prompt`). `context`, optional, scopes the question as for a
+  conversation run, with the same bounds (`invalid_context`). `threadId` and `runId` are any IDs of the client, at
   most 128 printable bytes: nothing is stored under them, and the audit
   carries `run_id`, with the `request_id` the response returns, to find the
   run in the logs of both sides.

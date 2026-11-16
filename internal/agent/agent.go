@@ -135,7 +135,13 @@ func (a *Agent) RunTurn(ctx context.Context, history []llm.Message, prompt strin
 	if strings.TrimSpace(prompt) == "" {
 		return result, fmt.Errorf("agent prompt is empty")
 	}
-	return a.run(ctx, history, &SuspendedTurn{Messages: []llm.Message{{Role: llm.RoleUser, Text: prompt}}}, "", emit)
+	// The context of the interface is the client's word about the prompt:
+	// the turn keeps it, until it ends, for the model to read it again.
+	interfaceContext := InterfaceContextFrom(ctx)
+	if err := ValidateInterfaceContext(interfaceContext); err != nil {
+		return result, err
+	}
+	return a.run(ctx, history, &SuspendedTurn{Messages: []llm.Message{{Role: llm.RoleUser, Text: prompt}}, InterfaceContext: interfaceContext}, "", emit)
 }
 
 // ResumeTurn continues a suspended turn with the decision of the user on its
@@ -264,6 +270,7 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 	if unattended {
 		systemPrompt += "\n" + unattendedInstruction
 	}
+	systemPrompt += "\n" + interfaceContextInstruction
 	promptSum := sha256.Sum256([]byte(systemPrompt))
 	// finish completes a result with what the turn used and was given.
 	finish := func(turn TurnResult) TurnResult {
@@ -285,6 +292,13 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 	messages = append(messages, llm.Message{Role: llm.RoleSystem, Text: systemPrompt + "\n" + confirmationState(state, decision)})
 	messages = append(messages, history...)
 	messages = append(messages, state.Messages...)
+	// The context of the interface goes with the prompt of the turn, in the
+	// requests only: the history never keeps it.
+	if prompt := len(history) + 1; len(state.InterfaceContext) > 0 && len(state.Messages) > 0 && messages[prompt].Role == llm.RoleUser {
+		if messages[prompt], err = promptWithInterfaceContext(messages[prompt], state.InterfaceContext); err != nil {
+			return result, err
+		}
+	}
 	llmContext := auth.WithoutAuthentication(ctx)
 	// pendingReasoning is the reasoning of the answer of state.Calls, given
 	// back with it in the next requests of the run; a turn waiting on the

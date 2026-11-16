@@ -240,6 +240,81 @@ func TestRunRefusesInvalidToolsOfTheClient(t *testing.T) {
 	}
 }
 
+// The context of the interface goes with a new prompt to its turn.
+func TestRunGivesTheContextOfTheInterfaceToTheTurn(t *testing.T) {
+	var given []agent.InterfaceEntry
+	service := conversationServiceFuncs{prepare: func(context.Context, auth.Identity, string, string) (conversation.TurnExecution, error) {
+		return &testTurnExecution{run: func(ctx context.Context, emit agent.EmitFunc) error {
+			given = agent.InterfaceContextFrom(ctx)
+			return emit(agent.Event{Type: agent.EventCompleted, FinishReason: llm.FinishReasonCompleted, TurnID: "turn-1", Iteration: 1})
+		}}, nil
+	}}
+	response := runRequest(t, service, `{"threadId":"conversation-id","runId":"run-1","messages":[{"id":"m1","role":"user","content":"why is it down?"}],
+		"context":[{"description":"page","value":"/objects"},{"description":"selected object","value":"test/svc/mcp-store","extra":1}]}`)
+	if response.Code != http.StatusOK || len(given) != 2 || given[1] != (agent.InterfaceEntry{Description: "selected object", Value: "test/svc/mcp-store"}) {
+		t.Fatalf("got %d %#v %s", response.Code, given, response.Body.String())
+	}
+}
+
+// The audit counts the context of the interface, never its values.
+func TestRunAuditsTheSizeOfTheContextOnly(t *testing.T) {
+	service := conversationServiceFuncs{prepare: func(context.Context, auth.Identity, string, string) (conversation.TurnExecution, error) {
+		return &testTurnExecution{run: func(_ context.Context, emit agent.EmitFunc) error {
+			return emit(agent.Event{Type: agent.EventCompleted, FinishReason: llm.FinishReasonCompleted, TurnID: "turn-1", Iteration: 1})
+		}}, nil
+	}}
+	var output bytes.Buffer
+	handler, err := NewHandler([]Backend{{Name: "om3", Conversations: service, Authenticator: allowTestTokenVerifier()}},
+		HandlerConfig{MaxConcurrentAsks: 4, AuditLogger: slog.New(slog.NewJSONHandler(&output, nil))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := authenticatedRequest(http.MethodPost, "/v1/om3/conversations/conversation-id/runs", `{"threadId":"conversation-id","runId":"run-1",
+		"messages":[{"id":"m1","role":"user","content":"why is it down?"}],
+		"context":[{"description":"page","value":"/objects"},{"description":"selected object","value":"test/svc/mcp-store"}]}`)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("got %d %s", response.Code, response.Body.String())
+	}
+	started := auditLine(t, output.String(), "conversation_run_started")
+	if !strings.Contains(started, `"context_entries":2`) || !strings.Contains(started, `"context_bytes":45`) || strings.Contains(output.String(), "mcp-store") {
+		t.Fatalf("audit = %s", output.String())
+	}
+}
+
+// auditLine gives the line of the audit of event.
+func auditLine(t *testing.T, audit, event string) string {
+	t.Helper()
+	for _, line := range strings.Split(audit, "\n") {
+		if strings.Contains(line, `"event":"`+event+`"`) || strings.Contains(line, `"msg":"`+event+`"`) {
+			return line
+		}
+	}
+	t.Fatalf("no %s in %s", event, audit)
+	return ""
+}
+
+func TestRunRefusesAnInvalidContext(t *testing.T) {
+	service := conversationServiceFuncs{prepare: func(context.Context, auth.Identity, string, string) (conversation.TurnExecution, error) {
+		t.Fatal("an invalid context reached the agent")
+		return nil, nil
+	}}
+	for name, context := range map[string]string{
+		"not an array": `{"page":"/objects"}`,
+		"no value":     `[{"description":"page"}]`,
+		"not a string": `[{"description":"page","value":1}]`,
+		"control":      `[{"description":"page","value":"a\nb"}]`,
+		"too long":     `[{"description":"page","value":"` + strings.Repeat("v", 2<<10) + `"}]`,
+	} {
+		response := runRequest(t, service, `{"threadId":"conversation-id","runId":"run-1","messages":[{"role":"user","content":"x"}],"context":`+context+`}`)
+		if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"invalid_context"`) {
+			t.Errorf("%s: got %d %s", name, response.Code, response.Body.String())
+		}
+	}
+}
+
 func TestRunResumesWithTheAnswersOfTheClient(t *testing.T) {
 	var answered []llm.ToolResult
 	service := conversationServiceFuncs{

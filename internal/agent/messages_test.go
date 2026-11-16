@@ -47,7 +47,7 @@ func TestRunTurnWithMessagesToolLoopAndNeutralHistory(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		if len(request.System) != 1 || request.System[0].Text != testSystemPrompt+"\n"+noPendingConfirmation || len(request.Tools) != 1 || request.Tools[0].Name != "get_cluster_health" {
+		if len(request.System) != 1 || request.System[0].Text != testSystemPrompt+"\n"+interfaceContextInstruction+"\n"+noPendingConfirmation || len(request.Tools) != 1 || request.Tools[0].Name != "get_cluster_health" {
 			t.Error("missing system instructions or MCP tools")
 		}
 		position := requests.Add(1)

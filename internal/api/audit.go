@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/opensvc/ai-agent/internal/agent"
 	"github.com/opensvc/ai-agent/internal/auth"
 	"github.com/opensvc/ai-agent/internal/requestid"
 )
@@ -72,4 +73,17 @@ func boundedAuditText(value string, maximum int) string {
 		return value
 	}
 	return string(runes[:maximum]) + "…"
+}
+
+// interfaceContextAttributes tell the size of the context of the interface
+// of a run, never its content; none without a context.
+func interfaceContextAttributes(entries []agent.InterfaceEntry) []slog.Attr {
+	if len(entries) == 0 {
+		return nil
+	}
+	size := 0
+	for _, entry := range entries {
+		size += len(entry.Description) + len(entry.Value)
+	}
+	return []slog.Attr{slog.Int("context_entries", len(entries)), slog.Int("context_bytes", size)}
 }

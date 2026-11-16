@@ -1,8 +1,10 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -112,6 +114,30 @@ func TestUnattendedRunStreamsItsSummary(t *testing.T) {
 	}
 }
 
+// An unattended run gives the context of its request to the turn, and the
+// audit counts it.
+func TestUnattendedRunGivesTheContextToTheTurn(t *testing.T) {
+	var given []agent.InterfaceEntry
+	runner := runnerFunc(func(ctx context.Context, _ []llm.Message, _ string, emit agent.EmitFunc) (agent.TurnResult, error) {
+		given = agent.InterfaceContextFrom(ctx)
+		return agent.TurnResult{FinishReason: llm.FinishReasonCompleted}, emit(agent.Event{Type: agent.EventCompleted, FinishReason: llm.FinishReasonCompleted, Iteration: 1})
+	})
+	var output bytes.Buffer
+	handler, err := NewHandler([]Backend{{Name: "om3", Conversations: turnService{}, Authenticator: allowTestTokenVerifier(), Runner: runner}},
+		HandlerConfig{MaxConcurrentAsks: 1, AuditLogger: slog.New(slog.NewJSONHandler(&output, nil))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, unattendedRequest(`{"threadId":"t","runId":"r","messages":[{"role":"user","content":"check it"}],"context":[{"description":"selected node","value":"dev5n1"}]}`))
+	if response.Code != http.StatusOK || len(given) != 1 || given[0] != (agent.InterfaceEntry{Description: "selected node", Value: "dev5n1"}) {
+		t.Fatalf("got %d %#v %s", response.Code, given, response.Body.String())
+	}
+	if !strings.Contains(output.String(), `"context_entries":1`) || !strings.Contains(output.String(), `"context_bytes":19`) || strings.Contains(output.String(), "dev5n1") {
+		t.Fatalf("audit = %s", output.String())
+	}
+}
+
 func TestUnattendedRunRefusesWhatItCannotServe(t *testing.T) {
 	runner := runnerFunc(func(context.Context, []llm.Message, string, agent.EmitFunc) (agent.TurnResult, error) {
 		t.Error("the runner ran")
@@ -129,6 +155,7 @@ func TestUnattendedRunRefusesWhatItCannotServe(t *testing.T) {
 		"an empty prompt":     {`{"threadId":"t","runId":"r","messages":[{"role":"user","content":"  "}]}`, "invalid_prompt"},
 		"no run ID":           {`{"threadId":"t","messages":[{"role":"user","content":"x"}]}`, "invalid_run_id"},
 		"no thread ID":        {`{"runId":"r","messages":[{"role":"user","content":"x"}]}`, "invalid_thread_id"},
+		"an invalid context":  {`{"threadId":"t","runId":"r","messages":[{"role":"user","content":"x"}],"context":[{"description":"page"}]}`, "invalid_context"},
 		"two objects":         {`{"threadId":"t","runId":"r","messages":[{"role":"user","content":"x"}]}{}`, "invalid_request"},
 	} {
 		response := httptest.NewRecorder()

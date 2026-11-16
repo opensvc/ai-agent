@@ -26,10 +26,8 @@ browser client calls the agent from an origin the operator allowed,
 see the [browser client guide](webapp.md).
 
 The collector relays the routes of its backend under `/assistant/*`, so
-that its web interface calls them with its own session. The relay does not
-serve the AG-UI runs yet, and bounds the bodies it relays to 64 KiB, less
-than a `RunAgentInput` may weigh: an interface of the collector calls the
-runs through the relay once it serves them.
+that its web interface calls them with its own session, the runs included,
+whose body it relays as it is, up to 4 MiB, the bound of the agent.
 
 ## 2. Conversations
 

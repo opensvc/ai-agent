@@ -105,7 +105,14 @@ func serveConversationRun(backend string, service ConversationService, limiter *
 			reject(http.StatusBadRequest, &APIError{Code: "invalid_tools", Message: err.Error()})
 			return
 		}
-		runContext := agent.WithClientTools(request.Context(), tools)
+		// The context of the interface goes with a new prompt; a resumed turn
+		// keeps the one of its prompt.
+		interfaceContext, err := input.InterfaceContext()
+		if err != nil {
+			reject(http.StatusBadRequest, &APIError{Code: "invalid_context", Message: err.Error()})
+			return
+		}
+		runContext := agent.WithInterfaceContext(agent.WithClientTools(request.Context(), tools), interfaceContext)
 		// A client of a newer minor version is served in the version of the
 		// agent, and told so; an invalid one, or another major line, was
 		// refused with the request.
@@ -257,6 +264,7 @@ func serveConversationRun(backend string, service ConversationService, limiter *
 				return
 			}
 			promptID = messageID
+			attributes = append(attributes, interfaceContextAttributes(interfaceContext)...)
 			prepared, err := service.PrepareTurn(request.Context(), identity, id, prompt)
 			if err != nil {
 				writeConversationError(response, request, audit, "conversation_run_rejected", err, id)

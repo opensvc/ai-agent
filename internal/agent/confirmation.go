@@ -123,6 +123,9 @@ type SuspendedTurn struct {
 	Preview          json.RawMessage `json:"preview,omitempty"`
 	PreviewError     string          `json:"preview_error,omitempty"`
 	PreviewArguments json.RawMessage `json:"preview_arguments,omitempty"`
+	// InterfaceContext is the context the interface of the user gave with
+	// the prompt of the turn, which the model reads again when it resumes.
+	InterfaceContext []InterfaceEntry `json:"interface_context,omitempty"`
 	// ToolSHA256 hashes the definition of the pending tool, as the server
 	// listed it when the confirmation was asked: name, title, description,
 	// schemas, annotations and metadata. A decision applies to that tool
@@ -150,6 +153,9 @@ func (s SuspendedTurn) validate(maxIterations int) error {
 	}
 	if s.Searches < 0 || s.Searches > maxSearchesPerTurn || len(s.ActiveTools) > maxModelTools {
 		return fmt.Errorf("suspended turn tool search state is out of range")
+	}
+	if err := ValidateInterfaceContext(s.InterfaceContext); err != nil {
+		return fmt.Errorf("suspended turn: %w", err)
 	}
 	if s.CodeSearches < 0 || s.CodeSearches > maxCodeSearchesPerAsk {
 		return fmt.Errorf("suspended turn code search count %d is out of range", s.CodeSearches)
