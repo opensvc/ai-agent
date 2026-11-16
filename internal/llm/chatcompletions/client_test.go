@@ -310,3 +310,24 @@ func TestClientSendsTheConfiguredReasoningEffort(t *testing.T) {
 		}
 	}
 }
+
+// A spent quota is answered 429, with or without a message: no wait renews it.
+func TestClientSpentQuotaIsNotTransient(t *testing.T) {
+	for _, body := range []string{`{"error":{"code":"insufficient_quota"}}`, `{"error":{"type":"insufficient_quota","message":"no quota"}}`} {
+		server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, _ *http.Request) {
+			response.Header().Set("Content-Type", "application/json")
+			response.WriteHeader(http.StatusTooManyRequests)
+			_, _ = fmt.Fprint(response, body)
+		}))
+		client, err := New(Config{BaseURL: server.URL + "/v1", Model: "test-model", AuthMode: AuthModeNone, Timeout: time.Minute, MaxOutputTokens: 1024}, server.Client())
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = client.Stream(t.Context(), llm.Request{Messages: []llm.Message{{Role: llm.RoleUser, Text: "health"}}}, func(llm.Event) error { return nil })
+		server.Close()
+		var provider *llm.ProviderError
+		if !errors.As(err, &provider) || provider.Transient || provider.Status != http.StatusTooManyRequests {
+			t.Fatalf("body %s: error = %#v", body, err)
+		}
+	}
+}

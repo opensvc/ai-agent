@@ -215,6 +215,13 @@ func streamRun(response http.ResponseWriter, request *http.Request, audit auditL
 				slog.Int("calls_asked", event.Refused.Asked),
 				slog.Int("calls_ran", event.Refused.Ran),
 			)
+		case agent.EventModelRetried:
+			audit.event(request.Context(), "llm_retried",
+				slog.Int("iteration", event.Iteration),
+				slog.Int("attempt", event.Retry.Attempt),
+				slog.Int("status", event.Retry.Status),
+				slog.Int64("wait_ms", event.Retry.Wait.Milliseconds()),
+			)
 		case agent.EventUsage:
 			usage.InputTokens = saturatingAdd(usage.InputTokens, event.Usage.InputTokens)
 			usage.OutputTokens = saturatingAdd(usage.OutputTokens, event.Usage.OutputTokens)

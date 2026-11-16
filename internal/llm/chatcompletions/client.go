@@ -178,13 +178,24 @@ func chatCompletionsEndpoint(baseURL string) (string, error) {
 	return parsed.JoinPath("chat/completions").String(), nil
 }
 
+// readAPIError reads the error a provider answered. A transient status, such
+// as 429 or 503, may be retried, unless the account has no quota left.
 func readAPIError(response *http.Response, token string) error {
+	noQuota, err := readAPIErrorBody(response, token)
+	return &llm.ProviderError{Err: err, Status: response.StatusCode,
+		Transient:  llm.TransientStatus(response.StatusCode) && !noQuota,
+		RetryAfter: llm.RetryAfter(response.Header, time.Now())}
+}
+
+// readAPIErrorBody formats the error a provider answered, and tells whether
+// it is the quota of the account that is spent, which a wait does not renew.
+func readAPIErrorBody(response *http.Response, token string) (bool, error) {
 	data, err := io.ReadAll(io.LimitReader(response.Body, maxErrorBodyBytes+1))
 	if err != nil {
-		return fmt.Errorf("Chat Completions API returned HTTP %d", response.StatusCode)
+		return false, fmt.Errorf("Chat Completions API returned HTTP %d", response.StatusCode)
 	}
 	if len(data) > maxErrorBodyBytes {
-		return fmt.Errorf("Chat Completions API returned HTTP %d with an oversized error body", response.StatusCode)
+		return false, fmt.Errorf("Chat Completions API returned HTTP %d with an oversized error body", response.StatusCode)
 	}
 	var body struct {
 		Error struct {
@@ -193,17 +204,19 @@ func readAPIError(response *http.Response, token string) error {
 			Type    string `json:"type"`
 		} `json:"error"`
 	}
+	noQuota := false
 	if json.Unmarshal(data, &body) == nil {
 		code := normalizeErrorText(fmt.Sprint(body.Error.Code), token)
 		message := normalizeErrorText(body.Error.Message, token)
+		noQuota = code == "insufficient_quota" || body.Error.Type == "insufficient_quota"
 		if code != "" && code != "<nil>" && message != "" {
-			return fmt.Errorf("Chat Completions API returned HTTP %d (%s): %s", response.StatusCode, code, message)
+			return noQuota, fmt.Errorf("Chat Completions API returned HTTP %d (%s): %s", response.StatusCode, code, message)
 		}
 		if message != "" {
-			return fmt.Errorf("Chat Completions API returned HTTP %d: %s", response.StatusCode, message)
+			return noQuota, fmt.Errorf("Chat Completions API returned HTTP %d: %s", response.StatusCode, message)
 		}
 	}
-	return fmt.Errorf("Chat Completions API returned HTTP %d", response.StatusCode)
+	return noQuota, fmt.Errorf("Chat Completions API returned HTTP %d", response.StatusCode)
 }
 
 func normalizeErrorText(value string, secret string) string {

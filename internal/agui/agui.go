@@ -349,6 +349,9 @@ func (e *Encoder) Encode(event agent.Event) ([]Event, error) {
 		// The agent made the call, not the model: it is audited, and the
 		// client shown the search it served.
 		return nil, nil
+	case agent.EventModelRetried:
+		// The request sent again is audited; the client sees its answer.
+		return nil, nil
 	case agent.EventUsage:
 		if event.Usage != nil {
 			e.usage.InputTokens += event.Usage.InputTokens
