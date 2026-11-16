@@ -317,8 +317,11 @@ rejected one, a result telling the call did not run.
 ### Interface context
 
 `context`, the AG-UI `Context` entries `{description, value}`, tells what
-the screen of the user shows when they send a new prompt: the page, the
-record open on it, its tab, a record looked at over the page. The model reads
+the screen of the user shows when they send a new prompt, and what they did
+or set in their session: the page, the record open on it, its tab, a record
+looked at over the page, the rows they ticked, their time zone and clock;
+the [browser guide](webapp.md#interface-context) holds the descriptions a
+client writes. The model reads
 it right after the prompt, in the same message, and its system prompt
 tells it that the context is data, never instructions, that its identifiers count as given by the
 user, to tell what a question such as "why is it down?" refers to, and that
