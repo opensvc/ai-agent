@@ -108,6 +108,42 @@ func TestStreamSupportsInitialBlockContent(t *testing.T) {
 	}
 }
 
+const thinkingStartEvent = `{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}}`
+
+// The thinking of the recent models, adaptive by default, is neither shown
+// nor a failure: the answer and its calls come as without it.
+func TestStreamSkipsThinking(t *testing.T) {
+	stream := sse(startEvent,
+		thinkingStartEvent,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"private reasoning"}}`,
+		`{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"c2lnbmF0dXJl"}}`,
+		blockStopEvent,
+		`{"type":"content_block_start","index":1,"content_block":{"type":"redacted_thinking","data":"opaque"}}`,
+		`{"type":"content_block_stop","index":1}`,
+		strings.Replace(textStartEvent, `"index":0`, `"index":2`, 1),
+		strings.Replace(textDeltaEvent, `"index":0`, `"index":2`, 1),
+		`{"type":"content_block_stop","index":2}`,
+		strings.Replace(toolStartEvent, `"index":0`, `"index":3`, 1),
+		strings.Replace(toolDeltaEvent, `"index":0`, `"index":3`, 1),
+		`{"type":"content_block_stop","index":3}`,
+		toolFinishEvent, stopEvent)
+	events, err := collectStream(t, stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var types []llm.EventType
+	for _, event := range events {
+		types = append(types, event.Type)
+		if strings.Contains(event.TextDelta, "private") || strings.Contains(event.TextDelta, "opaque") {
+			t.Fatalf("thinking shown: %#v", event)
+		}
+	}
+	want := []llm.EventType{llm.EventTextDelta, llm.EventToolCall, llm.EventUsage, llm.EventCompleted}
+	if !reflect.DeepEqual(types, want) || events[0].TextDelta != "OK" || string(events[1].ToolCall.Arguments) != `{"node":"node1"}` {
+		t.Fatalf("events = %#v", events)
+	}
+}
+
 func TestStreamSSEFraming(t *testing.T) {
 	stream := strings.Replace(textStream(), `data: `+textDeltaEvent, "data: {\"type\":\"content_block_delta\",\ndata: \"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"OK\"}}", 1)
 	stream = ": comment\nretry: 1000\nid: ignored\n" + strings.ReplaceAll(stream, "\n", "\r\n")
@@ -135,7 +171,8 @@ func TestStreamRejectsInvalidResponsesWithoutToolCallsOrCompletion(t *testing.T)
 		"mismatched delta":         sse(startEvent, toolStartEvent, textDeltaEvent),
 		"missing delta":            sse(startEvent, textStartEvent, `{"type":"content_block_delta","index":0}`),
 		"unknown block":            sse(startEvent, strings.Replace(toolStartEvent, `"tool_use"`, `"server_tool_use"`, 1)),
-		"thinking":                 sse(startEvent, `{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"private"}}`),
+		"text delta in thinking":   sse(startEvent, thinkingStartEvent, `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"private"}}`),
+		"delta in redacted":        sse(startEvent, `{"type":"content_block_start","index":0,"content_block":{"type":"redacted_thinking","data":"opaque"}}`, `{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"private"}}`),
 		"invalid args":             sse(startEvent, toolStartEvent, strings.Replace(toolDeltaEvent, `{\"node\":\"node1\"}`, `[1]`, 1), blockStopEvent, toolFinishEvent, stopEvent),
 		"truncated args":           sse(startEvent, toolStartEvent, strings.Replace(toolDeltaEvent, `{\"node\":\"node1\"}`, `{\"node\":`, 1), blockStopEvent, toolFinishEvent, stopEvent),
 		"conflicting input":        sse(startEvent, strings.Replace(toolStartEvent, `"input":{}`, `"input":{"node":"node2"}`, 1), toolDeltaEvent),
