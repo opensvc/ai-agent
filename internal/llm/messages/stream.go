@@ -159,6 +159,10 @@ func (s *streamState) consume(data []byte, eventName string) error {
 		block := *event.ContentBlock
 		switch block.Type {
 		case "text":
+		case "thinking", "redacted_thinking":
+			// The reasoning of the model, adaptive by default on the recent
+			// models: never shown nor replayed, as the chain of thought of the
+			// model is not given to the client.
 		case "tool_use":
 			if s.calls >= maxToolCalls {
 				return fmt.Errorf("Messages tool call count exceeds %d", maxToolCalls)
@@ -172,7 +176,7 @@ func (s *streamState) consume(data []byte, eventName string) error {
 			s.callIDs[block.ID] = struct{}{}
 			s.calls++
 		default:
-			return fmt.Errorf("unsupported Messages content block (only text and client tool_use are supported)")
+			return fmt.Errorf("unsupported Messages content block (only text, thinking and client tool_use are supported)")
 		}
 		s.blocks = append(s.blocks, pendingBlock{block: block})
 		if block.Type == "text" {
@@ -195,6 +199,9 @@ func (s *streamState) consume(data []byte, eventName string) error {
 		}
 		if block.block.Type == "text" && event.Delta.Type == "text_delta" {
 			return s.emitText(event.Delta.Text)
+		}
+		if block.block.Type == "thinking" && (event.Delta.Type == "thinking_delta" || event.Delta.Type == "signature_delta") {
+			return nil
 		}
 		if block.block.Type != "tool_use" || event.Delta.Type != "input_json_delta" {
 			return fmt.Errorf("Messages content delta does not match its block")

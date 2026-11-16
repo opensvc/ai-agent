@@ -60,8 +60,11 @@ OPENSVC_AI_LLM_API_TOKEN=replace-me
 ```
 
 `api_key` sends `x-api-key`; `bearer` remains available for Messages endpoints.
-Messages supports streamed text and MCP tool calls, without extended thinking
-or provider-hosted tools. Keep the API key only in the protected environment
+Messages supports streamed text and MCP tool calls, without provider-hosted
+tools. The thinking of a model that thinks by default, such as the recent
+Claude models, is neither shown nor given back to the model in the next
+request, and counts in `OPENSVC_AI_LLM_MAX_OUTPUT_TOKENS`: raise it, as 4096
+may cut an answer short. Keep the API key only in the protected environment
 file, never in Git or conversation history.
 
 The agent serves the `om3` backend under `/v1/om3` and reaches its MCP only
