@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/opensvc/ai-agent/internal/agent"
 )
 
 // RunAgentInput is the request of an AG-UI client for one run. The agent
-// reads the thread, the run, the last message of the user and the resume of
-// an interrupt; the history it keeps is its own, so the other messages, the
-// state, the context and the tools of the client are not read.
+// reads the thread, the run, the last message of the user, the context of
+// the interface, the tools of the client and the resume of an interrupt; the
+// history it keeps is its own, so the other messages and the state are not
+// read.
 type RunAgentInput struct {
 	ThreadID    string `json:"threadId"`
 	RunID       string `json:"runId"`
@@ -54,6 +57,35 @@ type ToolAnswer struct {
 	CallID  string
 	Text    string
 	IsError bool
+}
+
+// InterfaceContext gives the context of the input, AG-UI Context entries
+// {description, value}: what the interface of the user shows, such as the
+// page and the record open on it. Absent, null or empty, there is none.
+// Other members of an entry are ignored, as the protocol allows them.
+func (input RunAgentInput) InterfaceContext() ([]agent.InterfaceEntry, error) {
+	raw := bytes.TrimSpace(input.Context)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
+		return nil, nil
+	}
+	var entries []struct {
+		Description *string `json:"description"`
+		Value       *string `json:"value"`
+	}
+	if err := json.Unmarshal(raw, &entries); err != nil {
+		return nil, errors.New("the context must be an array of {description, value} strings")
+	}
+	result := make([]agent.InterfaceEntry, 0, len(entries))
+	for index, entry := range entries {
+		if entry.Description == nil || entry.Value == nil {
+			return nil, fmt.Errorf("context entry %d must have a description and a value", index)
+		}
+		result = append(result, agent.InterfaceEntry{Description: *entry.Description, Value: *entry.Value})
+	}
+	if err := agent.ValidateInterfaceContext(result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // ToolAnswers gives the answers of the client the input ends with: the

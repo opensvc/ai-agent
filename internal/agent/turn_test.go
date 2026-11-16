@@ -26,7 +26,7 @@ func TestRunTurnUsesIsolatedHistoryAndReturnsNewMessages(t *testing.T) {
 		if len(request.Messages) != 6 {
 			t.Fatalf("message count = %d, want system, four history messages and user", len(request.Messages))
 		}
-		if request.Messages[0].Role != llm.RoleSystem || request.Messages[0].Text != testSystemPrompt+"\n"+noPendingConfirmation {
+		if request.Messages[0].Role != llm.RoleSystem || request.Messages[0].Text != testSystemPrompt+"\n"+interfaceContextInstruction+"\n"+noPendingConfirmation {
 			t.Fatalf("system message = %#v", request.Messages[0])
 		}
 		if !reflect.DeepEqual(request.Messages[1:5], history) {

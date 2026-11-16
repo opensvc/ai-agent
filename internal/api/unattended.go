@@ -88,6 +88,12 @@ func serveUnattendedRun(backend string, runner UnattendedRunner, limiter *askLim
 			return
 		}
 		attributes = append(attributes, slog.String("run_id", boundedAuditID(input.RunID)), slog.String("protocol_version", boundedAuditID(input.ProtocolVersion)))
+		interfaceContext, err := input.InterfaceContext()
+		if err != nil {
+			reject(http.StatusBadRequest, "invalid_context", err.Error())
+			return
+		}
+		attributes = append(attributes, interfaceContextAttributes(interfaceContext)...)
 		prompt, skipped, err := input.Prompt()
 		switch {
 		case err != nil:
@@ -164,7 +170,7 @@ func serveUnattendedRun(backend string, runner UnattendedRunner, limiter *askLim
 			}
 		}
 		streamRun(response, request, audit, "unattended_run", attributes, codec, func(emit agent.EmitFunc) error {
-			result, err := runner.RunTurn(agent.WithUnattended(request.Context()), nil, prompt, func(event agent.Event) error {
+			result, err := runner.RunTurn(agent.WithInterfaceContext(agent.WithUnattended(request.Context()), interfaceContext), nil, prompt, func(event agent.Event) error {
 				record(event)
 				return emit(event)
 			})

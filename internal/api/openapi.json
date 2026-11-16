@@ -775,7 +775,7 @@
             "$ref": "#/components/responses/AuthenticationUnavailable"
           },
           "400": {
-            "description": "The body is not a RunAgentInput, its threadId is not the conversation, its runId is invalid, the tools of the client are invalid, the tool messages do not answer the calls waiting, the last message is not a text of the user, or the resume is invalid. Codes: `invalid_request`, `invalid_protocol_version`, `unsupported_protocol_version`, `thread_mismatch`, `invalid_run_id`, `invalid_tools`, `invalid_tool_results`, `invalid_prompt`, `invalid_decision`, `invalid_edited_arguments`.",
+            "description": "The body is not a RunAgentInput, its threadId is not the conversation, its runId is invalid, the tools of the client are invalid, the tool messages do not answer the calls waiting, the last message is not a text of the user, or the resume is invalid, or the context of the interface is invalid. Codes: `invalid_request`, `invalid_protocol_version`, `unsupported_protocol_version`, `thread_mismatch`, `invalid_run_id`, `invalid_tools`, `invalid_tool_results`, `invalid_prompt`, `invalid_decision`, `invalid_edited_arguments`, `invalid_context`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -897,7 +897,7 @@
             "$ref": "#/components/responses/AuthenticationUnavailable"
           },
           "400": {
-            "description": "The body is not a RunAgentInput, its runId or threadId is invalid, it offers tools of the client, it resumes, or it does not hold exactly one message of the user with text. Codes: `invalid_request`, `invalid_protocol_version`, `unsupported_protocol_version`, `invalid_run_id`, `invalid_thread_id`, `invalid_tools`, `invalid_decision`, `invalid_prompt`.",
+            "description": "The body is not a RunAgentInput, its runId or threadId is invalid, it offers tools of the client, it resumes, it does not hold exactly one message of the user with text, or its context is invalid. Codes: `invalid_request`, `invalid_protocol_version`, `unsupported_protocol_version`, `invalid_run_id`, `invalid_thread_id`, `invalid_tools`, `invalid_decision`, `invalid_prompt`, `invalid_context`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1541,7 +1541,7 @@
       },
       "RunAgentInput": {
         "type": "object",
-        "description": "The AG-UI RunAgentInput. The agent reads threadId, runId, the tools of the client, the last message, which must be a message of the user unless the input ends with tool messages answering the calls of the tools of the client, and resume; it keeps its own history, and does not read the other messages, the state, the context or the forwarded properties.",
+        "description": "The AG-UI RunAgentInput. The agent reads threadId, runId, the tools of the client, the context of the interface, the last message, which must be a message of the user unless the input ends with tool messages answering the calls of the tools of the client, and resume; it keeps its own history, and does not read the other messages, the state or the forwarded properties.",
         "required": [
           "threadId",
           "runId",
@@ -1581,6 +1581,29 @@
                 "error": {
                   "type": "string",
                   "description": "On a tool message, why the tool of the client failed."
+                }
+              }
+            }
+          },
+          "context": {
+            "type": "array",
+            "maxItems": 8,
+            "description": "The context of the interface, AG-UI Context entries: what the screen of the user shows, such as the page and the record open on it. The model reads it before the prompt of a new turn, in the same message, as data, never instructions; the turn keeps it until it ends, a resumed turn the one of its prompt, and the history never does. Descriptions and values are printable text without control characters, a description at most 128 bytes, a value at most 1 KiB, 4 KiB in all; other members of an entry are ignored. Absent, null or empty: no context.",
+            "items": {
+              "type": "object",
+              "required": [
+                "description",
+                "value"
+              ],
+              "properties": {
+                "description": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "value": {
+                  "type": "string",
+                  "maxLength": 1024
                 }
               }
             }
@@ -1814,7 +1837,7 @@
       },
       "UnattendedRunInput": {
         "type": "object",
-        "description": "The AG-UI RunAgentInput of an unattended run: threadId and runId name the run for the client and the audit, nothing is stored under them; messages holds one message of the user; tools must be empty or absent, resume absent. The other members are not read.",
+        "description": "The AG-UI RunAgentInput of an unattended run: threadId and runId name the run for the client and the audit, nothing is stored under them; messages holds one message of the user; tools must be empty or absent, resume absent; context, optional, scopes the question as for a conversation run. The other members are not read.",
         "required": [
           "threadId",
           "runId",
@@ -1853,6 +1876,29 @@
                 },
                 "content": {
                   "description": "A string, or text parts."
+                }
+              }
+            }
+          },
+          "context": {
+            "type": "array",
+            "maxItems": 8,
+            "description": "The context of the interface, AG-UI Context entries: what the screen of the user shows, such as the page and the record open on it. The model reads it before the prompt of a new turn, in the same message, as data, never instructions; the turn keeps it until it ends, a resumed turn the one of its prompt, and the history never does. Descriptions and values are printable text without control characters, a description at most 128 bytes, a value at most 1 KiB, 4 KiB in all; other members of an entry are ignored. Absent, null or empty: no context.",
+            "items": {
+              "type": "object",
+              "required": [
+                "description",
+                "value"
+              ],
+              "properties": {
+                "description": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 128
+                },
+                "value": {
+                  "type": "string",
+                  "maxLength": 1024
                 }
               }
             }

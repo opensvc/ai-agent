@@ -142,6 +142,28 @@ reload; `DELETE` on the same path withdraws it. Tell the user that their
 feedback and the exchange it rates are kept to improve the assistant, without
 their identity. See [the API](api.md#feedback) for the limits.
 
+## Interface context
+
+With a new prompt, send in `context` what the screen shows, so that a
+question such as "why is it down?" needs no name: see
+[Interface context](api.md#interface-context) for the bounds.
+
+- **The dock.** Asked from the dock over a page, the context describes that
+  page, read when the prompt is sent, or queued: the route, and the record open on it,
+  its tab, or the record peeked over the page, by their identifiers, such as
+  `{"description": "selected object", "value": "test/svc/mcp-store"}`.
+- **The assistant page.** On `/ai`, nothing is under the conversation: send
+  no context. A conversation continued there from the dock keeps what the
+  earlier turns said of the record in its history.
+- **Never free text.** Send the state of the navigation only, never the text
+  of a record, such as an alert message or a log line: other people wrote
+  it, and the model must not take it as the user's word. Read from the
+  address, a value goes only when shaped as what it names, an identifier
+  or the name of a tab: a link may come from someone else.
+- **Resume.** The run that answers a confirmation or the calls of the tools
+  of the client sends no context, or a valid one, which is ignored: the
+  turn keeps the one of its prompt.
+
 ## Action confirmation
 
 A tool that changes the cluster and that MCP annotates `destructiveHint: true`
