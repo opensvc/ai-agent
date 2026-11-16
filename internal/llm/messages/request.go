@@ -17,6 +17,9 @@ type createRequest struct {
 	Tools     []wireTool    `json:"tools,omitempty"`
 	// ToolChoice is set to none only: auto is the default.
 	ToolChoice *wireToolChoice `json:"tool_choice,omitempty"`
+	// Fingerprint hashes the system prompt and the tools, which the
+	// thinking of the answer is bound to.
+	Fingerprint string `json:"-"`
 }
 
 type wireToolChoice struct {
@@ -37,8 +40,23 @@ type wireBlock struct {
 	ToolUseID string          `json:"tool_use_id,omitempty"`
 	Content   string          `json:"content,omitempty"`
 	IsError   bool            `json:"is_error,omitempty"`
+	// Thinking, Signature and Data are read from the thinking blocks of an
+	// answer, which a request gives back as raw.
+	Thinking  string `json:"thinking,omitempty"`
+	Signature string `json:"signature,omitempty"`
+	Data      string `json:"data,omitempty"`
 	// CacheControl marks the end of a prefix the provider caches.
 	CacheControl *cacheControl `json:"cache_control,omitempty"`
+	// raw is a block of an answer given back as the model gave it.
+	raw json.RawMessage
+}
+
+func (b wireBlock) MarshalJSON() ([]byte, error) {
+	if b.raw != nil {
+		return b.raw, nil
+	}
+	type plain wireBlock
+	return json.Marshal(plain(b))
 }
 
 // cacheControl asks the provider to cache the prompt up to its block, for
@@ -54,8 +72,27 @@ type wireTool struct {
 }
 
 func newCreateRequest(model string, maxTokens int, request llm.Request) (createRequest, error) {
+	return buildCreateRequest(model, maxTokens, request, true)
+}
+
+// buildCreateRequest gives back the thinking of the answers of the turn when
+// replay is set, as far as their content binds them.
+func buildCreateRequest(model string, maxTokens int, request llm.Request, replay bool) (createRequest, error) {
 	result := createRequest{Model: model, MaxTokens: maxTokens, Stream: true}
 	var system []string
+	for _, message := range request.Messages {
+		if message.Role == llm.RoleSystem {
+			system = append(system, message.Text)
+		}
+	}
+	for _, tool := range request.Tools {
+		result.Tools = append(result.Tools, wireTool{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema})
+	}
+	result.Fingerprint = requestFingerprint(system, result.Tools)
+	answers := map[int][]json.RawMessage{}
+	if replay {
+		answers = replayable(request.Messages, result.Fingerprint)
+	}
 	pending := make(map[string]struct{})
 	seen := make(map[string]struct{})
 	appendMessage := func(role string, blocks []wireBlock) {
@@ -74,20 +111,29 @@ func newCreateRequest(model string, maxTokens int, request llm.Request) (createR
 			if len(result.Messages) != 0 {
 				return createRequest{}, fmt.Errorf("Messages system instructions must precede conversation messages")
 			}
-			system = append(system, message.Text)
 		case llm.RoleUser:
 			appendMessage("user", []wireBlock{{Type: "text", Text: message.Text}})
 		case llm.RoleAssistant:
 			var blocks []wireBlock
-			if message.Text != "" {
-				blocks = append(blocks, wireBlock{Type: "text", Text: message.Text})
-			}
 			for _, call := range message.ToolCalls {
 				if _, exists := seen[call.ID]; exists {
 					return createRequest{}, fmt.Errorf("Messages history has duplicate tool call IDs")
 				}
 				seen[call.ID] = struct{}{}
 				pending[call.ID] = struct{}{}
+			}
+			if content, ok := answers[index]; ok {
+				// The answer as the model gave it, its thinking included.
+				for _, raw := range content {
+					blocks = append(blocks, wireBlock{raw: raw})
+				}
+				appendMessage("assistant", blocks)
+				continue
+			}
+			if message.Text != "" {
+				blocks = append(blocks, wireBlock{Type: "text", Text: message.Text})
+			}
+			for _, call := range message.ToolCalls {
 				blocks = append(blocks, wireBlock{Type: "tool_use", ID: call.ID, Name: call.Name, Input: call.Arguments})
 			}
 			appendMessage("assistant", blocks)
@@ -121,9 +167,6 @@ func newCreateRequest(model string, maxTokens int, request llm.Request) (createR
 	// of the conversation: its tail would be written and never read.
 	if last := &result.Messages[len(result.Messages)-1]; len(last.Content) != 0 && !request.NoToolCall {
 		last.Content[len(last.Content)-1].CacheControl = &cacheControl{Type: "ephemeral"}
-	}
-	for _, tool := range request.Tools {
-		result.Tools = append(result.Tools, wireTool{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema})
 	}
 	if request.NoToolCall && len(result.Tools) != 0 {
 		result.ToolChoice = &wireToolChoice{Type: "none"}

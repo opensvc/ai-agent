@@ -28,6 +28,22 @@ type Message struct {
 	Text        string
 	ToolCalls   []ToolCall
 	ToolResults []ToolResult
+	// Reasoning is the reasoning of the model behind an assistant message,
+	// which the adapter that produced it gives back to the model in the next
+	// requests of the same turn. It lives as long as the turn runs: never
+	// stored, nor kept when the turn waits on the user.
+	Reasoning *Reasoning `json:"-"`
+}
+
+// MaxReasoningBytes bounds the reasoning of one assistant message.
+const MaxReasoningBytes = 1 << 20
+
+// Reasoning is opaque to all but the adapter of its Protocol, which another
+// adapter ignores: the reasoning of the model in the wire form of its
+// protocol, such as the thinking blocks of the Messages protocol.
+type Reasoning struct {
+	Protocol string
+	Data     json.RawMessage
 }
 
 // Tool describes a callable function using a JSON Schema input object.
@@ -59,6 +75,9 @@ const (
 	EventToolCall  EventType = "tool_call"
 	EventUsage     EventType = "usage"
 	EventCompleted EventType = "completed"
+	// EventReasoning gives, before the completion, the reasoning of the
+	// answer for the next requests of the turn.
+	EventReasoning EventType = "reasoning"
 )
 
 // Event is one provider-neutral item emitted by Client.Stream. Provider errors
@@ -69,6 +88,7 @@ type Event struct {
 	ToolCall     *ToolCall
 	Usage        *Usage
 	FinishReason FinishReason
+	Reasoning    *Reasoning
 }
 
 // Usage reports the common token counters exposed by LLM protocols.

@@ -67,9 +67,11 @@ no tool call and would read it nowhere; the audit line `llm_usage` of each
 call tells the tokens read from and written to the cache.
 Messages supports streamed text and MCP tool calls, without provider-hosted
 tools. The thinking of a model that thinks by default, such as the recent
-Claude models, is neither shown nor given back to the model in the next
-request, and counts in `OPENSVC_AI_LLM_MAX_OUTPUT_TOKENS`: raise it, as 4096
-may cut an answer short. Keep the API key only in the protected environment
+Claude models, is never shown, and counts in
+`OPENSVC_AI_LLM_MAX_OUTPUT_TOKENS`: raise it, as 4096 may cut an answer
+short. The next model calls of the turn read it again, as long as the system
+prompt and the tools it was given do not change: a `search_tools` that shows
+more tools leaves out the thinking before it. Keep the API key only in the protected environment
 file, never in Git or conversation history.
 
 The agent serves the `om3` backend under `/v1/om3` and reaches its MCP only
@@ -141,7 +143,7 @@ webapp origins, or `*` to allow all origins. Empty by default. See the
 | `OPENSVC_AI_TOOL_SEARCH_THRESHOLD` | `20` | `1` to `1024`, or `-1` to search only catalogs too large for one model request |
 | `OPENSVC_AI_LLM_TIMEOUT` | `2m` | any positive duration |
 | `OPENSVC_AI_LLM_MAX_OUTPUT_TOKENS` | `4096` | 1 to 131072 |
-| `OPENSVC_AI_LLM_REASONING_EFFORT` | unset: the model applies its own | `none`, `minimal`, `low`, `medium`, `high` or `xhigh`, as the model accepts; `responses` and `chat_completions` protocols only |
+| `OPENSVC_AI_LLM_REASONING_EFFORT` | unset: the model applies its own | `none`, `minimal`, `low`, `medium`, `high` or `xhigh`, as the model accepts; `responses` and `chat_completions` protocols only. With `responses`, an effort other than `none` asks for the reasoning of the model, encrypted (`include` `reasoning.encrypted_content`), which the next model calls of the turn read again |
 
 Durations use the Go syntax, such as `90s` or `2h30m`. An invalid value
 prevents startup.

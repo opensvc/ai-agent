@@ -291,3 +291,27 @@ func TestClientErrorsTellWhetherTheyAreTransient(t *testing.T) {
 		})
 	}
 }
+
+// A model reasoning gives its reasoning encrypted, nothing being stored; a
+// model told not to reason, or left to its default, is not asked for it.
+func TestClientAsksForTheEncryptedReasoning(t *testing.T) {
+	for effort, want := range map[string]bool{"": false, "none": false, "low": true} {
+		var body map[string]any
+		server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+			_ = json.NewDecoder(request.Body).Decode(&body)
+			response.Header().Set("Content-Type", "text/event-stream")
+			_, _ = fmt.Fprint(response, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":1,\"total_tokens\":2},\"output\":[]}}\n\n")
+		}))
+		client, err := New(Config{BaseURL: server.URL + "/v1", Model: "test-model", AuthMode: AuthModeNone, Timeout: time.Minute, MaxOutputTokens: 1024, ReasoningEffort: effort}, server.Client())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := client.Stream(t.Context(), llm.Request{Messages: []llm.Message{{Role: llm.RoleUser, Text: "health"}}}, func(llm.Event) error { return nil }); err != nil {
+			t.Fatalf("effort %q: %v", effort, err)
+		}
+		server.Close()
+		if got := fmt.Sprint(body["include"]) == "["+includeReasoning+"]"; got != want || body["store"] != false {
+			t.Fatalf("effort %q: include = %v, store = %v", effort, body["include"], body["store"])
+		}
+	}
+}

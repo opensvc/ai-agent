@@ -96,6 +96,16 @@ func (c *Client) Stream(ctx context.Context, request llm.Request, emit llm.EmitF
 	if err != nil {
 		return fmt.Errorf("encode Messages request: %w", err)
 	}
+	// The thinking given back must not make the request too large: the
+	// model reads the turn without it rather than the turn fail.
+	if len(body) > maxRequestBytes {
+		if wireRequest, err = buildCreateRequest(c.model, c.maxOutputTokens, request, false); err != nil {
+			return err
+		}
+		if body, err = json.Marshal(wireRequest); err != nil {
+			return fmt.Errorf("encode Messages request: %w", err)
+		}
+	}
 	if len(body) > maxRequestBytes {
 		return fmt.Errorf("Messages request exceeds %d bytes", maxRequestBytes)
 	}
@@ -143,7 +153,7 @@ func (c *Client) Stream(ctx context.Context, request llm.Request, emit llm.EmitF
 	if err != nil || mediaType != "text/event-stream" {
 		return fmt.Errorf("read Messages stream: expected text/event-stream")
 	}
-	if err := consumeStream(response.Body, emit); err != nil {
+	if err := consumeStream(response.Body, wireRequest.Fingerprint, emit); err != nil {
 		return fmt.Errorf("read Messages stream: %w", err)
 	}
 	return nil

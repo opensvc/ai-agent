@@ -93,6 +93,23 @@ func New(config Config, httpClient *http.Client) (*Client, error) {
 	}, nil
 }
 
+// encodeRequest completes a request with the reasoning the client asks for:
+// a model reasoning, the effort configured but none, gives its reasoning,
+// encrypted, for the next requests of the turn.
+func (c *Client) encodeRequest(wireRequest createRequest) ([]byte, error) {
+	if c.reasoningEffort != "" {
+		wireRequest.Reasoning = &reasoning{Effort: c.reasoningEffort}
+		if c.reasoningEffort != "none" {
+			wireRequest.Include = []string{includeReasoning}
+		}
+	}
+	body, err := json.Marshal(wireRequest)
+	if err != nil {
+		return nil, fmt.Errorf("encode Responses request: %w", err)
+	}
+	return body, nil
+}
+
 func (c *Client) Stream(ctx context.Context, request llm.Request, emit llm.EmitFunc) error {
 	if err := request.Validate(); err != nil {
 		return fmt.Errorf("validate LLM request: %w", err)
@@ -105,12 +122,19 @@ func (c *Client) Stream(ctx context.Context, request llm.Request, emit llm.EmitF
 	if err != nil {
 		return err
 	}
-	if c.reasoningEffort != "" {
-		wireRequest.Reasoning = &reasoning{Effort: c.reasoningEffort}
-	}
-	body, err := json.Marshal(wireRequest)
+	// The reasoning given back must not make the request too large: the
+	// model reads the turn without it rather than the turn fail.
+	body, err := c.encodeRequest(wireRequest)
 	if err != nil {
-		return fmt.Errorf("encode Responses request: %w", err)
+		return err
+	}
+	if len(body) > maxRequestBytes {
+		if wireRequest, err = buildCreateRequest(c.model, c.maxOutputTokens, request, false); err != nil {
+			return err
+		}
+		if body, err = c.encodeRequest(wireRequest); err != nil {
+			return err
+		}
 	}
 	if len(body) > maxRequestBytes {
 		return fmt.Errorf("encode Responses request: body exceeds %d bytes", maxRequestBytes)

@@ -148,6 +148,14 @@ Only one turn runs at a time in a conversation.
   client is shown none of the refused calls; the audit records the answer as
   `tool_calls_refused`, with the `bound` it passed, `answer` or `question`,
   `calls_asked` and `calls_ran`.
+- **Reasoning.** The reasoning of the model, the thinking of the Messages
+  protocol or the encrypted reasoning of the Responses protocol, is given
+  back to the model in the next model calls of the run, never to the client,
+  and never stored: neither the history nor a turn waiting on a
+  confirmation or on the client keeps it, the run that resumes it starting
+  without. A thinking block of the Messages protocol is bound to the system
+  prompt and the tools of its request: once a `search_tools` shows more
+  tools, the thinking before it is left out.
 - **Calls of the agent.** An MCP call the agent makes of its own, not the
   model, such as reading the version of the cluster a documentation search
   is about, is not shown to the client nor counted in `tool_calls`; the

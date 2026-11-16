@@ -180,6 +180,11 @@ func (s *streamState) consume(data []byte) error {
 		if err := s.emitCallsFromResponse(event.Response.Output); err != nil {
 			return err
 		}
+		if reasoning := answerReasoning(event.Response.Output); reasoning != nil {
+			if err := s.emitEvent(llm.Event{Type: llm.EventReasoning, Reasoning: reasoning}); err != nil {
+				return err
+			}
+		}
 		if err := s.emitUsage(event.Response.Usage); err != nil {
 			return err
 		}
@@ -244,8 +249,8 @@ type wireUsage struct {
 
 type responseEvent struct {
 	Response struct {
-		Output            []wireItem `json:"output"`
-		Usage             *wireUsage `json:"usage"`
+		Output            []json.RawMessage `json:"output"`
+		Usage             *wireUsage        `json:"usage"`
 		IncompleteDetails struct {
 			Reason string `json:"reason"`
 		} `json:"incomplete_details"`
@@ -256,8 +261,12 @@ type responseEvent struct {
 	} `json:"response"`
 }
 
-func (s *streamState) emitCallsFromResponse(items []wireItem) error {
-	for index, item := range items {
+func (s *streamState) emitCallsFromResponse(output []json.RawMessage) error {
+	for index, raw := range output {
+		var item wireItem
+		if err := json.Unmarshal(raw, &item); err != nil {
+			return fmt.Errorf("decode response output item: %w", err)
+		}
 		if item.Type != "function_call" {
 			continue
 		}
