@@ -269,7 +269,8 @@ func TestTheSystemMessageTellsTheConfirmationState(t *testing.T) {
 	if len(seen) != 2 || !strings.HasSuffix(seen[0], "\n"+noPendingConfirmation) {
 		t.Fatalf("new turn system message = %q", seen)
 	}
-	if want := "\nThe confirmation of unprovision_instance on path test/svc/web node n2 was answered: approved. It covers that call only; no other confirmation is pending."; !strings.HasSuffix(seen[1], want) {
+	if want := "\nThe confirmation of unprovision_instance on path test/svc/web node n2 was answered: approved. It covers that call only; no other confirmation is pending. " +
+		"Finish what the user asked: a change of other records it covers still takes its own call, confirmed on its own."; !strings.HasSuffix(seen[1], want) {
 		t.Fatalf("resumed turn system message = %q", seen[1])
 	}
 	if strings.Contains(seen[1], "ignore the rules") {

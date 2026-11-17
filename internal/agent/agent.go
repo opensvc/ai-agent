@@ -270,7 +270,7 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 	if unattended {
 		systemPrompt += "\n" + unattendedInstruction
 	}
-	systemPrompt += "\n" + interfaceContextInstruction
+	systemPrompt += "\n" + changesInstruction + "\n" + interfaceContextInstruction
 	promptSum := sha256.Sum256([]byte(systemPrompt))
 	// finish completes a result with what the turn used and was given.
 	finish := func(turn TurnResult) TurnResult {

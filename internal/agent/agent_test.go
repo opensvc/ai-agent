@@ -35,7 +35,7 @@ func TestAskReturnsDirectAnswerAndExposesAllTools(t *testing.T) {
 			t.Fatal("LLM context contains verified OpenSVC identity")
 		}
 	}, steps: []llmStep{func(request llm.Request, emit llm.EmitFunc) error {
-		if len(request.Messages) != 2 || request.Messages[0].Role != llm.RoleSystem || request.Messages[0].Text != testSystemPrompt+"\n"+interfaceContextInstruction+"\n"+noPendingConfirmation {
+		if len(request.Messages) != 2 || request.Messages[0].Role != llm.RoleSystem || request.Messages[0].Text != testSystemPrompt+"\n"+changesInstruction+"\n"+interfaceContextInstruction+"\n"+noPendingConfirmation {
 			t.Fatalf("unexpected initial messages: %#v", request.Messages)
 		}
 		if len(request.Tools) != 2 || request.Tools[1].Name != "refresh_instance_status" {

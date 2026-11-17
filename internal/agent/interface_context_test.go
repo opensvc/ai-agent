@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -38,6 +39,22 @@ func TestValidateInterfaceContext(t *testing.T) {
 	}
 	if err := ValidateInterfaceContext(screen); err != nil {
 		t.Fatal(err)
+	}
+	// The ids of 50 rows ticked, as many as a tool of a collector takes, with
+	// the page, their count and the clock of the user.
+	ids := make([]string, 50)
+	for index := range ids {
+		ids[index] = fmt.Sprintf("4c1f2b9e-1a2b-4c3d-8e4f-%012d", index)
+	}
+	ticked := []InterfaceEntry{
+		{Description: "page", Value: "/nodes"},
+		{Description: "checked nodes", Value: strings.Join(ids, " ")},
+		{Description: "checked nodes count", Value: "50"},
+		{Description: "time zone", Value: "Europe/Paris"},
+		{Description: "local time", Value: "2026-11-17T14:00:00+01:00"},
+	}
+	if err := ValidateInterfaceContext(ticked); err != nil {
+		t.Fatalf("50 rows ticked: %v", err)
 	}
 	if err := ValidateInterfaceContext(nil); err != nil {
 		t.Fatal(err)
