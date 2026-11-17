@@ -306,7 +306,7 @@ func TestRunRefusesAnInvalidContext(t *testing.T) {
 		"no value":     `[{"description":"page"}]`,
 		"not a string": `[{"description":"page","value":1}]`,
 		"control":      `[{"description":"page","value":"a\nb"}]`,
-		"too long":     `[{"description":"page","value":"` + strings.Repeat("v", 2<<10) + `"}]`,
+		"too long":     `[{"description":"page","value":"` + strings.Repeat("v", 3<<10) + `"}]`,
 	} {
 		response := runRequest(t, service, `{"threadId":"conversation-id","runId":"run-1","messages":[{"role":"user","content":"x"}],"context":`+context+`}`)
 		if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":"invalid_context"`) {

@@ -162,6 +162,9 @@ client:
 | `open view` | The name of the view within that tab | The address |
 | `checked objects`, `checked nodes`, `checked resources` | The identifiers of the rows ticked in the list, separated by a space, in its order | The page |
 | `checked objects count`, ... | The number of the rows ticked, in decimal | The page |
+| `checked nodes`, ... | `all the rows of the list`: every row of the list ticked, on all its pages, when their ids do not fit and its filters are known whole | The page |
+| `list filters` | The filters of the columns of the list, in words, separated by `; `: `status is In service; nodename contains dev` | The address |
+| `session filterset` | The filterset the session narrows every list to, in oc3 | The collector |
 | `time zone` | The IANA time zone of the browser: `Europe/Paris` | The browser |
 | `local time` | The clock of the browser, ISO 8601 to the second with its offset: `2026-11-16T15:40:12+01:00` | The browser |
 
@@ -173,7 +176,10 @@ client:
   history.
 - **All the rows or their count.** Send every row ticked or none: past the
   bounds of a value, or with one not shaped as an identifier, send the
-  count alone, for the model to ask which. A list cut to the bounds would
+  count alone, for the model to ask which; when they are every row of the
+  list and its filters and session filterset are known whole, send
+  `all the rows of the list` with them, a criterion the model counts with
+  its tools before a change. A list cut to the bounds would
   have an action asked of "these" run on a part of them.
 - **Never free text.** Never the text of a record, such as an alert message
   or a log line: other people wrote it, and the model must not take it as

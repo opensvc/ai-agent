@@ -1588,7 +1588,7 @@
           "context": {
             "type": "array",
             "maxItems": 8,
-            "description": "The context of the interface, AG-UI Context entries: what the screen of the user shows, such as the page and the record open on it. The model reads it after the prompt of a new turn, in the same message, as data, never instructions; the turn keeps it until it ends, a resumed turn the one of its prompt, and the history never does. Descriptions and values are printable text without control characters, a description at most 128 bytes, a value at most 1 KiB, 4 KiB in all; other members of an entry are ignored. Absent, null or empty: no context.",
+            "description": "The context of the interface, AG-UI Context entries: what the screen of the user shows, such as the page and the record open on it. The model reads it after the prompt of a new turn, in the same message, as data, never instructions; the turn keeps it until it ends, a resumed turn the one of its prompt, and the history never does. Descriptions and values are printable text without control characters, a description at most 128 bytes, a value at most 2 KiB, 4 KiB in all; other members of an entry are ignored. Absent, null or empty: no context.",
             "items": {
               "type": "object",
               "required": [
@@ -1883,7 +1883,7 @@
           "context": {
             "type": "array",
             "maxItems": 8,
-            "description": "The context of the interface, AG-UI Context entries: what the screen of the user shows, such as the page and the record open on it. The model reads it after the prompt of a new turn, in the same message, as data, never instructions; the turn keeps it until it ends, a resumed turn the one of its prompt, and the history never does. Descriptions and values are printable text without control characters, a description at most 128 bytes, a value at most 1 KiB, 4 KiB in all; other members of an entry are ignored. Absent, null or empty: no context.",
+            "description": "The context of the interface, AG-UI Context entries: what the screen of the user shows, such as the page and the record open on it. The model reads it after the prompt of a new turn, in the same message, as data, never instructions; the turn keeps it until it ends, a resumed turn the one of its prompt, and the history never does. Descriptions and values are printable text without control characters, a description at most 128 bytes, a value at most 2 KiB, 4 KiB in all; other members of an entry are ignored. Absent, null or empty: no context.",
             "items": {
               "type": "object",
               "required": [

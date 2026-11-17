@@ -74,11 +74,13 @@ func confirmationState(state *SuspendedTurn, decision Decision) string {
 	if target != "" {
 		target = " on" + target
 	}
-	answer := "approved"
 	if decision == DecisionReject {
-		answer = "rejected"
+		return fmt.Sprintf("The confirmation of %s%s was answered: rejected. It covers that call only; no other confirmation is pending.", call.Name, target)
 	}
-	return fmt.Sprintf("The confirmation of %s%s was answered: %s. It covers that call only; no other confirmation is pending.", call.Name, target, answer)
+	// An approval covers its call, not the end of the request: the model goes
+	// on with the other records it asked a change of, each confirmed in turn.
+	return fmt.Sprintf("The confirmation of %s%s was answered: approved. It covers that call only; no other confirmation is pending. "+
+		"Finish what the user asked: a change of other records it covers still takes its own call, confirmed on its own.", call.Name, target)
 }
 
 // SuspendedTurn is the state of a turn waiting for the user to confirm a tool
