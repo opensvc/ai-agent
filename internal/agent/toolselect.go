@@ -68,9 +68,11 @@ const searchInstruction = "Only some tools are listed. When none fits, call " + 
 	"; the tools it finds can be called from the next step on. " + searchBeforeDenying + " " + searchKeywordsGuidance + " " + searchBatchGuidance +
 	" Call the tools a search shows directly; never search again for a tool already shown."
 
-// searchBeforeDenying asks the model to search before it says a capability
-// is missing: the tools not listed exist all the same.
-const searchBeforeDenying = "A capability no listed tool covers may still exist: never tell the user that something cannot be read or done, or that no tool gives it, before a search for it found nothing."
+// searchBeforeDenying asks the model to search the tools before it says a
+// capability is missing: the tools not listed exist all the same. It names
+// search_tools: a model searched the documentation and the code instead,
+// six to eight times, never the tools, then said it found nothing.
+const searchBeforeDenying = "A capability no listed tool covers may still exist: never tell the user that something cannot be read or done, or that no tool gives it, before " + SearchToolName + " found nothing for it; a search of the documentation or of the code finds no tool."
 
 // searchBatchGuidance asks the model to request the tools a search found
 // together, as the backend prompts do for independent calls.
