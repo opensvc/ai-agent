@@ -753,6 +753,11 @@ func TestTheSearchInstructionAsksToSearchBeforeDenying(t *testing.T) {
 	if !strings.Contains(searchInstruction, searchBeforeDenying) {
 		t.Fatalf("the search instruction does not ask to search before denying: %q", searchInstruction)
 	}
+	// The tools, not the documentation: a model searched the documentation
+	// and the code instead, then said it found nothing.
+	if !strings.Contains(searchBeforeDenying, SearchToolName+" found nothing") {
+		t.Fatalf("the rule does not name %s: %q", SearchToolName, searchBeforeDenying)
+	}
 }
 
 // How to show a tool found but not shown is told by the hint of a search

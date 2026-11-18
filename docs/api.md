@@ -780,9 +780,10 @@ ask the model for 3 to 8 English keywords describing the required
 capability, without greetings, full sentences or resource identifiers: a
 whole question brings words that favor the wrong tools. The system prompt
 also asks the model never to tell the user that something cannot be read or
-done, or that no tool gives it, before a search for it found nothing: a
-model that found no listed tool said none existed, when a search would have
-found it. The query is bounded
+done, or that no tool gives it, before `search_tools` found nothing for it,
+a search of the documentation or of the code finding no tool: a model that
+found no listed tool said none existed, when a search would have found it,
+and another searched the documentation only. The query is bounded
 to 512 UTF-8 bytes (its schema can only state 512 characters as
 `maxLength`), its first 32 distinct terms are searched, and a query without
 a searchable term is refused. The agent ranks the catalog with BM25 over the name, title,
