@@ -747,6 +747,14 @@ func TestAnExactNameIsReturnedAloneAndKept(t *testing.T) {
 	}
 }
 
+// A model told the user no tool read a value that a tool not listed read:
+// the instruction asks for a search before saying a capability is missing.
+func TestTheSearchInstructionAsksToSearchBeforeDenying(t *testing.T) {
+	if !strings.Contains(searchInstruction, searchBeforeDenying) {
+		t.Fatalf("the search instruction does not ask to search before denying: %q", searchInstruction)
+	}
+}
+
 // How to show a tool found but not shown is told by the hint of a search
 // result only: said in the prompt or the description of search_tools, it
 // made the model search again the exact name of the tools already shown.

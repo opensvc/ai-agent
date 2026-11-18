@@ -60,10 +60,17 @@ const searchKeywordsGuidance = "Use 3–8 English keywords describing the requir
 // not shown: the hint of a search result does, beside those tools. Said in
 // the prompt and in the description of search_tools, it made the model
 // search the exact name of the tools already shown, in 11 of 12 replays of
-// a first turn, against none without it.
+// a first turn, against none without it. A model that found no listed tool
+// for a read or an action told the user that none existed, such as no tool
+// reading the value of a key or the configuration of an object, when a
+// search would have found it: searchBeforeDenying asks for that search.
 const searchInstruction = "Only some tools are listed. When none fits, call " + SearchToolName +
-	"; the tools it finds can be called from the next step on. " + searchKeywordsGuidance + " " + searchBatchGuidance +
+	"; the tools it finds can be called from the next step on. " + searchBeforeDenying + " " + searchKeywordsGuidance + " " + searchBatchGuidance +
 	" Call the tools a search shows directly; never search again for a tool already shown."
+
+// searchBeforeDenying asks the model to search before it says a capability
+// is missing: the tools not listed exist all the same.
+const searchBeforeDenying = "A capability no listed tool covers may still exist: never tell the user that something cannot be read or done, or that no tool gives it, before a search for it found nothing."
 
 // searchBatchGuidance asks the model to request the tools a search found
 // together, as the backend prompts do for independent calls.
