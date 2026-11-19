@@ -40,6 +40,11 @@ type LLMConfig struct {
 	// ReasoningEffort is the reasoning effort the requests ask the model
 	// for; empty, the requests ask none, and the model applies its own.
 	ReasoningEffort string
+	// OmitStore leaves the store field out of the Chat Completions requests,
+	// for a provider that refuses it, such as Mistral: its retention policy
+	// then applies. By default each request sends store false, forbidding
+	// the provider to keep it.
+	OmitStore bool
 }
 
 // LoadLLM loads the LLM backend independently from the HTTP API configuration.
@@ -107,6 +112,22 @@ func loadLLM(getenv func(string) string) (LLMConfig, error) {
 			return LLMConfig{}, fmt.Errorf("OPENSVC_AI_LLM_REASONING_EFFORT requires the responses or chat_completions protocol")
 		}
 		config.ReasoningEffort = value
+	}
+	// store false forbids the provider to keep a request. Left out, the
+	// retention policy of the provider applies, which the administrator
+	// checks: OpenAI stores by default the Responses requests, and the Chat
+	// Completions requests of new accounts. omit is allowed on the Chat
+	// Completions protocol only, for a provider refusing the field, such as
+	// Mistral, and only when the administrator asks it.
+	switch value := strings.TrimSpace(getenv("OPENSVC_AI_LLM_STORE")); value {
+	case "", "false":
+	case "omit":
+		if config.Protocol != LLMProtocolChatCompletions {
+			return LLMConfig{}, fmt.Errorf("OPENSVC_AI_LLM_STORE omit requires the chat_completions protocol")
+		}
+		config.OmitStore = true
+	default:
+		return LLMConfig{}, fmt.Errorf("OPENSVC_AI_LLM_STORE %q must be false or omit", value)
 	}
 	return config, nil
 }

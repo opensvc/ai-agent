@@ -17,7 +17,7 @@ func TestNoToolCallKeepsTheToolsAndForbidsACall(t *testing.T) {
 			Tools:      []llm.Tool{{Name: "get_cluster_health", InputSchema: json.RawMessage(`{"type":"object"}`)}},
 			NoToolCall: noToolCall,
 		}
-		wire, err := newCreateRequest("model", 100, request)
+		wire, err := newCreateRequest("model", 100, false, request)
 		if err != nil {
 			t.Fatal(err)
 		}

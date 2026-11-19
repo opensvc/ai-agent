@@ -154,6 +154,50 @@ func TestLoadLLMMessagesAuthentication(t *testing.T) {
 	}
 }
 
+func TestLoadLLMStore(t *testing.T) {
+	base := map[string]string{
+		"OPENSVC_AI_LLM_PROTOCOL": "chat_completions", "OPENSVC_AI_LLM_BASE_URL": "https://llm.example.test/v1",
+		"OPENSVC_AI_LLM_MODEL": "test-model", "OPENSVC_AI_LLM_AUTH_MODE": "none",
+	}
+	load := func(changes map[string]string) (LLMConfig, error) {
+		values := map[string]string{}
+		for key, value := range base {
+			values[key] = value
+		}
+		for key, value := range changes {
+			values[key] = value
+		}
+		return loadLLM(func(key string) string { return values[key] })
+	}
+	// Unset or false, every request sends store false.
+	for _, value := range []string{"", "false", " false "} {
+		if config, err := load(map[string]string{"OPENSVC_AI_LLM_STORE": value}); err != nil || config.OmitStore {
+			t.Fatalf("%q: %+v, %v", value, config, err)
+		}
+	}
+	// An explicit false stays allowed on every protocol.
+	for _, protocol := range []string{"responses", "messages"} {
+		if config, err := load(map[string]string{"OPENSVC_AI_LLM_PROTOCOL": protocol, "OPENSVC_AI_LLM_STORE": "false"}); err != nil || config.OmitStore {
+			t.Fatalf("%s false: %+v, %v", protocol, config, err)
+		}
+	}
+	if config, err := load(map[string]string{"OPENSVC_AI_LLM_STORE": "omit"}); err != nil || !config.OmitStore {
+		t.Fatalf("omit: %+v, %v", config, err)
+	}
+	// The Responses protocol stores a request unless told not to: omit is
+	// refused there, as on Messages, and any other value anywhere.
+	for _, changes := range []map[string]string{
+		{"OPENSVC_AI_LLM_STORE": "omit", "OPENSVC_AI_LLM_PROTOCOL": "responses"},
+		{"OPENSVC_AI_LLM_STORE": "omit", "OPENSVC_AI_LLM_PROTOCOL": "messages"},
+		{"OPENSVC_AI_LLM_STORE": "true"},
+		{"OPENSVC_AI_LLM_STORE": "Omit"},
+	} {
+		if _, err := load(changes); err == nil {
+			t.Fatalf("%v accepted", changes)
+		}
+	}
+}
+
 func TestLoadLLMReasoningEffort(t *testing.T) {
 	base := map[string]string{
 		"OPENSVC_AI_LLM_PROTOCOL": "responses", "OPENSVC_AI_LLM_BASE_URL": "https://llm.example.test/v1",

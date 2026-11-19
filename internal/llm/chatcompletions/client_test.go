@@ -124,11 +124,11 @@ func TestNewCreateRequestMapsConversation(t *testing.T) {
 		},
 		Tools: []llm.Tool{{Name: "cluster_health", InputSchema: json.RawMessage(`{"type":"object"}`)}},
 	}
-	wire, err := newCreateRequest("test-model", 512, request)
+	wire, err := newCreateRequest("test-model", 512, false, request)
 	if err != nil {
 		t.Fatalf("map request: %v", err)
 	}
-	if len(wire.Messages) != 4 || len(wire.Tools) != 1 || wire.Store || !wire.Stream || !wire.StreamOptions.IncludeUsage {
+	if len(wire.Messages) != 4 || len(wire.Tools) != 1 || wire.Store == nil || *wire.Store || !wire.Stream || !wire.StreamOptions.IncludeUsage {
 		t.Fatalf("unexpected mapped request %#v", wire)
 	}
 	assistant := wire.Messages[2]
@@ -144,10 +144,40 @@ func TestNewCreateRequestMapsConversation(t *testing.T) {
 	}
 }
 
+// A provider refusing store, such as Mistral, gets requests without it when
+// the administrator asks; every other request sends store false.
+func TestClientOmitsStoreWhenAsked(t *testing.T) {
+	for _, omit := range []bool{false, true} {
+		t.Run(fmt.Sprintf("omit %v", omit), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+				var body map[string]any
+				if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+					t.Errorf("decode request: %v", err)
+					return
+				}
+				if store, sent := body["store"]; omit && sent || !omit && store != false {
+					t.Errorf("got store %#v, sent %v", store, sent)
+				}
+				response.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+				_, _ = fmt.Fprint(response, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n")
+				_, _ = fmt.Fprint(response, "data: [DONE]\n\n")
+			}))
+			t.Cleanup(server.Close)
+			client, err := New(Config{BaseURL: server.URL + "/v1", Model: "test-model", AuthMode: AuthModeNone, Timeout: time.Minute, MaxOutputTokens: 1024, OmitStore: omit}, server.Client())
+			if err != nil {
+				t.Fatalf("create client: %v", err)
+			}
+			if err := client.Stream(t.Context(), llm.Request{Messages: []llm.Message{{Role: llm.RoleUser, Text: "health"}}}, func(llm.Event) error { return nil }); err != nil {
+				t.Fatalf("stream: %v", err)
+			}
+		})
+	}
+}
+
 // The volatile text of a prompt goes after its text: the prefix the provider
 // caches by tokens still holds the text for the next requests.
 func TestNewCreateRequestPutsVolatileTextAfterTheText(t *testing.T) {
-	wire, err := newCreateRequest("test-model", 512, llm.Request{Messages: []llm.Message{{Role: llm.RoleUser, Text: "health", Volatile: "<interface_context>[]</interface_context>"}}})
+	wire, err := newCreateRequest("test-model", 512, false, llm.Request{Messages: []llm.Message{{Role: llm.RoleUser, Text: "health", Volatile: "<interface_context>[]</interface_context>"}}})
 	if err != nil {
 		t.Fatal(err)
 	}

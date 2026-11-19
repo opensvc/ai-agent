@@ -141,8 +141,11 @@ Conversations must not retain MCP sessions or provider-specific state.
   stop the turn. Do not invent daemon data or hide authorization failures.
 - Protocol adapters translate wire events into neutral events, bound I/O,
   disable redirects and set provider storage to false where the protocol
-  supports it. Keep provider-specific parsing and completion semantics out of
-  the orchestration loop.
+  supports it; Chat Completions leaves the field out only when
+  `OPENSVC_AI_LLM_STORE=omit` asks it, for a provider that refuses it, whose
+  retention policy then applies and the agent logs at startup. Keep
+  provider-specific parsing and completion semantics out of the orchestration
+  loop.
 - Bind all conversation operations to their backend and to verified
   `issuer` and `subject`, and `cluster_id` for a backend bound to clusters. Foreign and missing conversation IDs share the same public error.
 - Serialize turns per conversation without holding a database transaction
