@@ -142,8 +142,9 @@ Conversations must not retain MCP sessions or provider-specific state.
 - Protocol adapters translate wire events into neutral events, bound I/O,
   disable redirects and set provider storage to false where the protocol
   supports it; Chat Completions leaves the field out only when
-  `OPENSVC_AI_LLM_STORE=omit` asks it, for a provider that refuses it, whose
-  retention policy then applies and the agent logs at startup. Keep
+  `OPENSVC_AI_LLM_STORE=omit` asks it, for a provider that refuses it; that
+  provider's retention policy then applies, and the agent logs the omission at
+  startup. Keep
   provider-specific parsing and completion semantics out of the orchestration
   loop.
 - Bind all conversation operations to their backend and to verified
