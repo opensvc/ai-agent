@@ -14,7 +14,7 @@ type createRequest struct {
 	ToolChoice          string         `json:"tool_choice,omitempty"`
 	Stream              bool           `json:"stream"`
 	StreamOptions       streamOptions  `json:"stream_options"`
-	Store               bool           `json:"store"`
+	Store               *bool          `json:"store,omitempty"`
 	MaxCompletionTokens int            `json:"max_completion_tokens"`
 	// ReasoningEffort is left out unless configured: the model applies its own.
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
@@ -58,13 +58,17 @@ type toolOutput struct {
 	IsError bool            `json:"is_error"`
 }
 
-func newCreateRequest(model string, maxOutputTokens int, request llm.Request) (createRequest, error) {
+// newCreateRequest maps a request; store is false, forbidding the provider
+// to keep it, unless omitStore leaves it out for a provider refusing it.
+func newCreateRequest(model string, maxOutputTokens int, omitStore bool, request llm.Request) (createRequest, error) {
 	wire := createRequest{
 		Model:               model,
 		Stream:              true,
 		StreamOptions:       streamOptions{IncludeUsage: true},
-		Store:               false,
 		MaxCompletionTokens: maxOutputTokens,
+	}
+	if !omitStore {
+		wire.Store = new(bool)
 	}
 	for _, neutralMessage := range request.Messages {
 		switch neutralMessage.Role {

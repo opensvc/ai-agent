@@ -47,6 +47,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("load LLM configuration: %v", err)
 	}
+	if llmConfig.OmitStore {
+		log.Printf("LLM requests leave store out (OPENSVC_AI_LLM_STORE=omit): the retention policy of the provider applies")
+	}
 	agentConfig, err := config.LoadAgent()
 	if err != nil {
 		log.Fatalf("load agent configuration: %v", err)

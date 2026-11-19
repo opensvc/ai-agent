@@ -34,6 +34,9 @@ type Config struct {
 	MaxOutputTokens int
 	// ReasoningEffort is sent with each request when set.
 	ReasoningEffort string
+	// OmitStore leaves store out of each request, for a provider refusing
+	// it; each request sends store false otherwise.
+	OmitStore bool
 }
 
 // Client implements llm.Client using the Chat Completions HTTP protocol.
@@ -44,6 +47,7 @@ type Client struct {
 	tokenSource     TokenSource
 	maxOutputTokens int
 	reasoningEffort string
+	omitStore       bool
 	httpClient      *http.Client
 }
 
@@ -89,6 +93,7 @@ func New(config Config, httpClient *http.Client) (*Client, error) {
 		tokenSource:     config.TokenSource,
 		maxOutputTokens: config.MaxOutputTokens,
 		reasoningEffort: config.ReasoningEffort,
+		omitStore:       config.OmitStore,
 		httpClient:      &clientCopy,
 	}, nil
 }
@@ -101,7 +106,7 @@ func (c *Client) Stream(ctx context.Context, request llm.Request, emit llm.EmitF
 		return fmt.Errorf("stream Chat Completions: event consumer is nil")
 	}
 
-	wireRequest, err := newCreateRequest(c.model, c.maxOutputTokens, request)
+	wireRequest, err := newCreateRequest(c.model, c.maxOutputTokens, c.omitStore, request)
 	if err != nil {
 		return err
 	}

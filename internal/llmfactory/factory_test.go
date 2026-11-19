@@ -1,12 +1,16 @@
 package llmfactory
 
 import (
+	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/opensvc/ai-agent/internal/config"
+	"github.com/opensvc/ai-agent/internal/llm"
 	"github.com/opensvc/ai-agent/internal/llm/chatcompletions"
 	"github.com/opensvc/ai-agent/internal/llm/messages"
 	"github.com/opensvc/ai-agent/internal/llm/responses"
@@ -43,6 +47,38 @@ func TestNewSelectsChatCompletionsProtocol(t *testing.T) {
 	}
 	if _, ok := client.(*chatcompletions.Client); !ok {
 		t.Fatalf("got client type %T, want Chat Completions client", client)
+	}
+}
+
+// The setting reaches the client: a request leaves store out only when
+// OmitStore asks it.
+func TestNewPassesOmitStoreToChatCompletions(t *testing.T) {
+	for _, omit := range []bool{false, true} {
+		t.Run(fmt.Sprintf("omit %v", omit), func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+				var body map[string]any
+				if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+					t.Errorf("decode request: %v", err)
+					return
+				}
+				if _, sent := body["store"]; sent == omit {
+					t.Errorf("omit %v: store sent %v", omit, sent)
+				}
+				response.Header().Set("Content-Type", "text/event-stream")
+				_, _ = fmt.Fprint(response, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+			}))
+			t.Cleanup(server.Close)
+			client, err := New(config.LLMConfig{
+				Protocol: config.LLMProtocolChatCompletions, BaseURL: server.URL + "/v1", Model: "test-model",
+				AuthMode: config.LLMAuthModeNone, Timeout: time.Minute, MaxOutputTokens: 1024, OmitStore: omit,
+			}, server.Client())
+			if err != nil {
+				t.Fatalf("create LLM client: %v", err)
+			}
+			if err := client.Stream(t.Context(), llm.Request{Messages: []llm.Message{{Role: llm.RoleUser, Text: "health"}}}, func(llm.Event) error { return nil }); err != nil {
+				t.Fatalf("stream: %v", err)
+			}
+		})
 	}
 }
 

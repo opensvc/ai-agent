@@ -55,6 +55,7 @@ func New(processConfig config.LLMConfig, httpClient *http.Client) (llm.Client, e
 			Timeout:         processConfig.Timeout,
 			MaxOutputTokens: processConfig.MaxOutputTokens,
 			ReasoningEffort: processConfig.ReasoningEffort,
+			OmitStore:       processConfig.OmitStore,
 		}, httpClient)
 	default:
 		return nil, fmt.Errorf("unsupported LLM protocol %q", processConfig.Protocol)
