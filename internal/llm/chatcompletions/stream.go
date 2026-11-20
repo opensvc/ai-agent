@@ -93,11 +93,41 @@ func consumeStream(reader io.Reader, emit llm.EmitFunc, secret string) error {
 	return nil
 }
 
+// deltaContent is the text of a delta: a string, or a list of typed parts,
+// as Mistral streams it when it reasons, its reasoning a part of type
+// thinking among parts of type text. The text parts are the answer; the
+// others, the reasoning of the model among them, are left out: never
+// emitted, never stored.
+type deltaContent struct {
+	text string
+}
+
+func (c *deltaContent) UnmarshalJSON(data []byte) error {
+	var text string
+	if err := json.Unmarshal(data, &text); err == nil {
+		c.text = text
+		return nil
+	}
+	var parts []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(data, &parts); err != nil {
+		return fmt.Errorf("delta content is neither a string nor a list of parts")
+	}
+	for _, part := range parts {
+		if part.Type == "text" {
+			c.text += part.Text
+		}
+	}
+	return nil
+}
+
 type streamChunk struct {
 	Choices []struct {
 		Index int `json:"index"`
 		Delta struct {
-			Content   *string         `json:"content"`
+			Content   *deltaContent   `json:"content"`
 			ToolCalls []wireToolDelta `json:"tool_calls"`
 		} `json:"delta"`
 		FinishReason *string `json:"finish_reason"`
@@ -153,8 +183,8 @@ func (s *streamState) consume(data []byte) error {
 		if s.finished && (choice.Delta.Content != nil || len(choice.Delta.ToolCalls) != 0 || choice.FinishReason != nil) {
 			return fmt.Errorf("SSE event contains choice data after finish reason")
 		}
-		if choice.Delta.Content != nil && *choice.Delta.Content != "" {
-			if err := s.emitEvent(llm.Event{Type: llm.EventTextDelta, TextDelta: *choice.Delta.Content}); err != nil {
+		if choice.Delta.Content != nil && choice.Delta.Content.text != "" {
+			if err := s.emitEvent(llm.Event{Type: llm.EventTextDelta, TextDelta: choice.Delta.Content.text}); err != nil {
 				return err
 			}
 		}

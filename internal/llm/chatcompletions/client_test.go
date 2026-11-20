@@ -144,6 +144,40 @@ func TestNewCreateRequestMapsConversation(t *testing.T) {
 	}
 }
 
+// A reasoning model of Mistral streams its text as a list of typed parts:
+// the text parts are the answer, its reasoning, a part of type thinking, is
+// never emitted.
+func TestClientReadsTextPartsAndLeavesReasoningOut(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+		_, _ = fmt.Fprint(response, "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"\"},\"finish_reason\":null}]}\n\n")
+		_, _ = fmt.Fprint(response, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":[{\"type\":\"thinking\",\"thinking\":[{\"type\":\"text\",\"text\":\"secret plan\"}],\"closed\":true}]},\"finish_reason\":null}]}\n\n")
+		_, _ = fmt.Fprint(response, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":[{\"type\":\"text\",\"text\":\"cluster \"}]},\"finish_reason\":null}]}\n\n")
+		_, _ = fmt.Fprint(response, "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"healthy\"},\"finish_reason\":\"stop\"}]}\n\n")
+		_, _ = fmt.Fprint(response, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(server.Close)
+	client := newTestClient(t, server.URL+"/v1", AuthModeNone, nil, server.Client())
+	var text strings.Builder
+	err := client.Stream(t.Context(), llm.Request{Messages: []llm.Message{{Role: llm.RoleUser, Text: "health"}}}, func(event llm.Event) error {
+		text.WriteString(event.TextDelta)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("stream: %v", err)
+	}
+	if text.String() != "cluster healthy" {
+		t.Fatalf("got text %q", text.String())
+	}
+}
+
+func TestDeltaContentRefusesAnotherShape(t *testing.T) {
+	var content deltaContent
+	if err := json.Unmarshal([]byte(`{"type":"text"}`), &content); err == nil {
+		t.Fatal("an object accepted as content")
+	}
+}
+
 // A provider refusing store, such as Mistral, gets requests without it when
 // the administrator asks; every other request sends store false.
 func TestClientOmitsStoreWhenAsked(t *testing.T) {
