@@ -371,7 +371,8 @@ func TestCapabilities(t *testing.T) {
 	newConversationTestHandler(t, noopConversationService{}).ServeHTTP(response, authenticatedRequest(http.MethodGet, "/v1/om3/capabilities", ""))
 	var capabilities map[string]map[string]any
 	if err := json.Unmarshal(response.Body.Bytes(), &capabilities); err != nil || response.Code != http.StatusOK ||
-		capabilities["tools"]["clientProvided"] != true || capabilities["humanInTheLoop"]["interrupts"] != true || capabilities["humanInTheLoop"]["approveWithEdits"] != true {
+		capabilities["tools"]["clientProvided"] != true || capabilities["humanInTheLoop"]["interrupts"] != true || capabilities["humanInTheLoop"]["approveWithEdits"] != true ||
+		capabilities["custom"]["feedback"] != true {
 		t.Fatalf("got %d %s", response.Code, response.Body.String())
 	}
 }

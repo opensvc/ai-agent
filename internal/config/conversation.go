@@ -16,6 +16,9 @@ type ConversationConfig struct {
 	DatabasePath      string
 	Lifetime          time.Duration
 	FeedbackRetention time.Duration
+	// FeedbackEnabled serves the feedback of the users on their turns; an
+	// operator whose users must not rate the answers turns it off.
+	FeedbackEnabled bool
 	// The limits of the store, zero for its defaults: the conversations of
 	// the instance, those of one user, the size of the database, and the
 	// share of it one user stores.
@@ -50,6 +53,14 @@ func loadConversation(getenv func(string) string) (ConversationConfig, error) {
 		}
 		retention = parsed
 	}
+	feedbackEnabled := true
+	switch value := strings.TrimSpace(getenv("OPENSVC_AI_FEEDBACK_ENABLED")); value {
+	case "", "true":
+	case "false":
+		feedbackEnabled = false
+	default:
+		return ConversationConfig{}, fmt.Errorf("parse OPENSVC_AI_FEEDBACK_ENABLED %q: expected true or false", value)
+	}
 	maxConversations, err := conversationLimit(getenv, "OPENSVC_AI_CONVERSATION_MAX", 1, 1_000_000)
 	if err != nil {
 		return ConversationConfig{}, err
@@ -74,7 +85,7 @@ func loadConversation(getenv func(string) string) (ConversationConfig, error) {
 		return ConversationConfig{}, err
 	}
 	return ConversationConfig{
-		DatabasePath: databasePath, Lifetime: lifetime, FeedbackRetention: retention,
+		DatabasePath: databasePath, Lifetime: lifetime, FeedbackRetention: retention, FeedbackEnabled: feedbackEnabled,
 		MaxConversations: maxConversations, MaxUserConversations: maxUserConversations, MaxDatabaseBytes: int64(maxDatabaseMiB) << 20,
 		MaxUserBytes: int64(maxUserMiB) << 20,
 	}, nil

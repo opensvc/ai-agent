@@ -93,3 +93,56 @@ func TestFeedbackRoutes(t *testing.T) {
 		t.Fatalf("delete missing = %d", response.Code)
 	}
 }
+
+// An agent whose operator turned the feedback off refuses its routes without
+// reaching the conversations, and tells so in its capabilities.
+func TestFeedbackDisabled(t *testing.T) {
+	called := false
+	service := conversationServiceFuncs{
+		feedback: func(context.Context, auth.Identity, string, string, conversation.Feedback) (conversation.FeedbackRecord, error) {
+			called = true
+			return conversation.FeedbackRecord{}, nil
+		},
+		unrate: func(context.Context, auth.Identity, string, string) error {
+			called = true
+			return nil
+		},
+	}
+	handler, err := NewHandler([]Backend{{Name: "om3", Conversations: service, Authenticator: allowTestTokenVerifier()}},
+		HandlerConfig{MaxConcurrentAsks: 4, AuditLogger: discardAuditLogger(), FeedbackDisabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The body is not read: an invalid one, without Content-Type, is refused
+	// as the valid one.
+	for _, test := range []struct{ method, body, contentType string }{
+		{http.MethodPut, `{"rating":"up"}`, "application/json"},
+		{http.MethodPut, `not json`, ""},
+		{http.MethodDelete, ``, ""},
+	} {
+		request := authenticatedRequest(test.method, "/v1/om3/conversations/c-1/turns/t-1/feedback", test.body)
+		if test.contentType != "" {
+			request.Header.Set("Content-Type", test.contentType)
+		}
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		var body ErrorResponse
+		if response.Code != http.StatusForbidden || json.NewDecoder(response.Body).Decode(&body) != nil || body.Error.Code != "feedback_disabled" || called {
+			t.Fatalf("%s %q: status=%d code=%q called=%v", test.method, test.body, response.Code, body.Error.Code, called)
+		}
+	}
+	// Authentication comes first.
+	for _, method := range []string{http.MethodPut, http.MethodDelete} {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, httptest.NewRequest(method, "/v1/om3/conversations/c-1/turns/t-1/feedback", strings.NewReader(`{"rating":"up"}`)))
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("%s unauthenticated: status=%d", method, response.Code)
+		}
+	}
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, authenticatedRequest(http.MethodGet, "/v1/om3/capabilities", ""))
+	var capabilities map[string]map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &capabilities); err != nil || response.Code != http.StatusOK || capabilities["custom"]["feedback"] != false {
+		t.Fatalf("capabilities: %d %s", response.Code, response.Body.String())
+	}
+}

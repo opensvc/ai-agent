@@ -77,6 +77,17 @@ func serveDeleteFeedback(service ConversationService, audit auditLogger) http.Ha
 	}
 }
 
+// serveFeedbackDisabled refuses the feedback routes of an agent whose
+// operator turned the feedback off, before reading the body.
+func serveFeedbackDisabled(audit auditLogger) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		audit.event(request.Context(), "turn_feedback_rejected",
+			slog.String("conversation_id", boundedAuditID(request.PathValue("id"))), slog.String("turn_id", boundedAuditID(request.PathValue("turn_id"))),
+			slog.Int("status", http.StatusForbidden), slog.String("code", "feedback_disabled"))
+		writeJSONError(response, http.StatusForbidden, "feedback_disabled", "the feedback is disabled on this agent")
+	}
+}
+
 func writeFeedbackError(response http.ResponseWriter, request *http.Request, audit auditLogger, err error, attributes []slog.Attr) {
 	status, code, message := conversationError(err)
 	switch {

@@ -182,7 +182,8 @@ await agent.runAgent({ runId, tools }, subscriber);
 ## 7. Capabilities
 
 `GET /v1/{backend}/capabilities` answers the AG-UI `AgentCapabilities` of
-the runs: streaming, the tools of the client, the interrupts without edits.
+the runs: streaming, the tools of the client, the interrupts with edits of
+the arguments, and in `custom.feedback` whether the turns take a feedback.
 `HttpAgent` does not read them; a subclass exposes them:
 
 ```javascript
@@ -196,7 +197,9 @@ class OpenSVCAgent extends HttpAgent {
 ## 8. Operations
 
 - **Feedback.** Rate a completed turn with
-  `PUT …/turns/{turnId}/feedback`, the `turnId` of `RUN_FINISHED`; see the
+  `PUT …/turns/{turnId}/feedback`, the `turnId` of `RUN_FINISHED`, unless
+  the capabilities give `custom.feedback` false: the operator turned it off,
+  and the feedback routes return 403 `feedback_disabled`; see the
   [API](api.md#feedback).
 - **Errors.** A request refused before the stream answers an HTTP error
   with a JSON body, `{"error": {"code", "message"}}`; once the stream

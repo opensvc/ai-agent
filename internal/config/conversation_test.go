@@ -63,6 +63,33 @@ func TestLoadConversationFeedbackRetention(t *testing.T) {
 	}
 }
 
+func TestLoadConversationFeedbackEnabled(t *testing.T) {
+	for _, test := range []struct {
+		value   string
+		enabled bool
+	}{{"", true}, {"true", true}, {"false", false}, {" false ", false}} {
+		config, err := loadConversation(func(key string) string {
+			if key == "OPENSVC_AI_FEEDBACK_ENABLED" {
+				return test.value
+			}
+			return ""
+		})
+		if err != nil || config.FeedbackEnabled != test.enabled {
+			t.Fatalf("%q: enabled = %v, %v", test.value, config.FeedbackEnabled, err)
+		}
+	}
+	for _, value := range []string{"no", "0", "False"} {
+		if _, err := loadConversation(func(key string) string {
+			if key == "OPENSVC_AI_FEEDBACK_ENABLED" {
+				return value
+			}
+			return ""
+		}); err == nil {
+			t.Fatalf("feedback enabled %q succeeded", value)
+		}
+	}
+}
+
 func TestLoadConversationLimits(t *testing.T) {
 	env := map[string]string{
 		"OPENSVC_AI_CONVERSATION_MAX":              "2000",

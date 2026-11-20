@@ -505,9 +505,10 @@ not on the clusters or the collector.
 route, for a client to shape its interface before a run: `transport`
 `streaming`, `tools` `supported` and `clientProvided`, `parallelCalls` left
 undeclared, `humanInTheLoop`
-`approvals`, `interrupts` and `approveWithEdits`, and `multimodal`
-`input` text only. `HttpAgent` does not read it: a client subclassing it
-implements `getCapabilities()` with it.
+`approvals`, `interrupts` and `approveWithEdits`, `multimodal` `input` text
+only, and `custom` `feedback`, always present: true, or false when the
+operator turned the [feedback](#feedback) off. `HttpAgent` does not read it: a client
+subclassing it implements `getCapabilities()` with it.
 
 ### Unattended runs
 
@@ -906,6 +907,13 @@ rates then deletes again and again, one model turn per feedback, can fill the
 anonymous feedback, and push out the oldest, the others' included. The
 feedback stays anonymous by design; the cost of a turn per feedback is the
 bound.
+
+An operator whose users must not rate the answers sets
+`OPENSVC_AI_FEEDBACK_ENABLED=false`: for every backend, `GET …/capabilities`
+returns `custom.feedback` false, for the client to hide the rating, and `PUT`
+and `DELETE …/feedback` return 403 `feedback_disabled`, after authentication
+and without reading the body. The feedback stored before is kept until its
+retention ends, still exported and still shown on the messages that carry it.
 
 `opensvc-ai-agentd feedback export [-since 720h] [-with-tool-results]`, run on
 the agent host with its environment, writes the feedback created within the

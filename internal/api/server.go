@@ -29,6 +29,9 @@ type HandlerConfig struct {
 	MaxConcurrentAsksPerUser int
 	AuditLogger              *slog.Logger
 	CORSAllowedOrigins       []string
+	// FeedbackDisabled refuses the feedback routes of every backend and
+	// tells so in their capabilities; the zero value serves them.
+	FeedbackDisabled bool
 }
 
 // Backend is one product the agent serves under /v1/{Name}. Its routes
@@ -94,7 +97,7 @@ func NewHandler(backends []Backend, config HandlerConfig) (http.Handler, error) 
 			return nil, fmt.Errorf("API backend %s authenticator is nil", backend.Name)
 		}
 		headers = append(headers, backend.Authenticator.Headers()...)
-		registerBackend(mux, backend, limiter, auditLogger{logger: config.AuditLogger.With(slog.String("backend", backend.Name))})
+		registerBackend(mux, backend, config.FeedbackDisabled, limiter, auditLogger{logger: config.AuditLogger.With(slog.String("backend", backend.Name))})
 	}
 	handler, err := withCORS(mux, config.CORSAllowedOrigins, headers)
 	if err != nil {
@@ -110,7 +113,13 @@ type backendRoute struct {
 	handler http.Handler
 }
 
-func backendRoutes(backend string, conversations ConversationService, tools ToolLister, runner UnattendedRunner, limiter *askLimiter, audit auditLogger) []backendRoute {
+func backendRoutes(backend string, conversations ConversationService, tools ToolLister, runner UnattendedRunner, feedbackDisabled bool, limiter *askLimiter, audit auditLogger) []backendRoute {
+	var putFeedback, deleteFeedback http.HandlerFunc
+	if feedbackDisabled {
+		putFeedback, deleteFeedback = serveFeedbackDisabled(audit), serveFeedbackDisabled(audit)
+	} else {
+		putFeedback, deleteFeedback = servePutFeedback(conversations, audit), serveDeleteFeedback(conversations, audit)
+	}
 	return []backendRoute{
 		{"POST", "/conversations", serveCreateConversation(conversations, audit)},
 		{"GET", "/conversations", serveListConversations(conversations, audit)},
@@ -120,16 +129,16 @@ func backendRoutes(backend string, conversations ConversationService, tools Tool
 		{"DELETE", "/conversations/{id}", serveDeleteConversation(conversations, audit)},
 		{"POST", "/conversations/{id}/runs", serveConversationRun(backend, conversations, limiter, audit)},
 		{"POST", "/runs", serveUnattendedRun(backend, runner, limiter, audit)},
-		{"GET", "/capabilities", http.HandlerFunc(serveCapabilities)},
+		{"GET", "/capabilities", serveCapabilities(feedbackDisabled)},
 		{"GET", "/tools", serveTools(tools, audit)},
-		{"PUT", "/conversations/{id}/turns/{turn_id}/feedback", servePutFeedback(conversations, audit)},
-		{"DELETE", "/conversations/{id}/turns/{turn_id}/feedback", serveDeleteFeedback(conversations, audit)},
+		{"PUT", "/conversations/{id}/turns/{turn_id}/feedback", putFeedback},
+		{"DELETE", "/conversations/{id}/turns/{turn_id}/feedback", deleteFeedback},
 	}
 }
 
-func registerBackend(mux *http.ServeMux, backend Backend, limiter *askLimiter, audit auditLogger) {
+func registerBackend(mux *http.ServeMux, backend Backend, feedbackDisabled bool, limiter *askLimiter, audit auditLogger) {
 	prefix := "/v1/" + backend.Name
-	for _, route := range backendRoutes(backend.Name, backend.Conversations, backend.Tools, backend.Runner, limiter, audit) {
+	for _, route := range backendRoutes(backend.Name, backend.Conversations, backend.Tools, backend.Runner, feedbackDisabled, limiter, audit) {
 		mux.Handle(route.method+" "+prefix+route.path, requireAccessToken(backend.Authenticator, audit, route.handler))
 	}
 }

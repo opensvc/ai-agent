@@ -364,21 +364,29 @@ func decodeRunRequest(response http.ResponseWriter, request *http.Request, id st
 
 // agentCapabilities is the AG-UI AgentCapabilities the runs route honours:
 // it streams over SSE, calls the tools of its MCP and accepts the tools of
-// the client, and pauses for approvals with interrupts, without edits of
-// the arguments.
-var agentCapabilities = map[string]any{
-	"identity":       map[string]any{"name": "OpenSVC AI agent", "type": "opensvc-ai-agent", "provider": "OpenSVC", "version": buildinfo.Version()},
-	"transport":      map[string]any{"streaming": true},
-	"tools":          map[string]any{"supported": true, "clientProvided": true},
-	"humanInTheLoop": map[string]any{"supported": true, "approvals": true, "interrupts": true, "approveWithEdits": true},
-	"multimodal":     map[string]any{"input": map[string]any{"image": false, "audio": false, "video": false, "pdf": false, "file": false}},
+// the client, and pauses for approvals with interrupts, with edits of the
+// arguments. Its custom group tells whether the turns take a feedback, for
+// the client to offer it or not.
+func agentCapabilities(feedbackDisabled bool) map[string]any {
+	return map[string]any{
+		"identity":       map[string]any{"name": "OpenSVC AI agent", "type": "opensvc-ai-agent", "provider": "OpenSVC", "version": buildinfo.Version()},
+		"transport":      map[string]any{"streaming": true},
+		"tools":          map[string]any{"supported": true, "clientProvided": true},
+		"humanInTheLoop": map[string]any{"supported": true, "approvals": true, "interrupts": true, "approveWithEdits": true},
+		"multimodal":     map[string]any{"input": map[string]any{"image": false, "audio": false, "video": false, "pdf": false, "file": false}},
+		"custom":         map[string]any{"feedback": !feedbackDisabled},
+	}
 }
 
 // serveCapabilities answers what the runs route of the backend can do, for
-// an AG-UI client to shape its interface before a run.
-func serveCapabilities(response http.ResponseWriter, _ *http.Request) {
-	response.Header().Set("Cache-Control", "no-store")
-	writeJSON(response, http.StatusOK, agentCapabilities)
+// an AG-UI client to shape its interface before a run. The capabilities do
+// not change while the agent runs: they are built once.
+func serveCapabilities(feedbackDisabled bool) http.HandlerFunc {
+	capabilities := agentCapabilities(feedbackDisabled)
+	return func(response http.ResponseWriter, _ *http.Request) {
+		response.Header().Set("Cache-Control", "no-store")
+		writeJSON(response, http.StatusOK, capabilities)
+	}
 }
 
 // inPhase tells whether the messages of the client hold the last stored
