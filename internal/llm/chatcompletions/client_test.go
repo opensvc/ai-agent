@@ -171,10 +171,76 @@ func TestClientReadsTextPartsAndLeavesReasoningOut(t *testing.T) {
 	}
 }
 
-func TestDeltaContentRefusesAnotherShape(t *testing.T) {
+// Only the parts of type text are read: the reasoning, wherever its text
+// sits, is never part of the answer.
+func TestDeltaContentReadsTextPartsOnly(t *testing.T) {
+	for _, test := range []struct {
+		content, text string
+	}{
+		{`"plain"`, "plain"},
+		{`""`, ""},
+		{`[]`, ""},
+		{`[null]`, ""},
+		{`[{"type":"reference","text":"x"}]`, ""},
+		{`[{"type":"thinking","text":"secret"}]`, ""},
+		{`[{"type":"thinking","thinking":[{"type":"text","text":"secret"}]}]`, ""},
+		{`[{"type":"thinking","text":{"nested":1}}]`, ""},
+		{`[{"type":"text","text":"a"},{"type":"thinking","text":"secret"},{"type":"text","text":"b"}]`, "ab"},
+		{`[{"type":"text"}]`, ""},
+	} {
+		var content deltaContent
+		if err := json.Unmarshal([]byte(test.content), &content); err != nil || content.text != test.text {
+			t.Errorf("%s: got %q, %v, want %q", test.content, content.text, err, test.text)
+		}
+	}
+	for _, refused := range []string{`{"type":"text"}`, `5`, `true`, `["text"]`, `[[]]`, `[{"type":"text","text":5}]`} {
+		var content deltaContent
+		if err := json.Unmarshal([]byte(refused), &content); err == nil {
+			t.Errorf("%s accepted as content", refused)
+		}
+	}
+	// A value decoded again holds the new text only.
 	var content deltaContent
-	if err := json.Unmarshal([]byte(`{"type":"text"}`), &content); err == nil {
-		t.Fatal("an object accepted as content")
+	_ = json.Unmarshal([]byte(`[{"type":"text","text":"a"}]`), &content)
+	if err := json.Unmarshal([]byte(`[]`), &content); err != nil || content.text != "" {
+		t.Fatalf("decoded again: %q, %v", content.text, err)
+	}
+}
+
+// Reasoning parts before tool calls give the calls, no text; reasoning after
+// the finish reason is refused, as any data is.
+func TestClientReasoningPartsAroundToolCalls(t *testing.T) {
+	stream := func(lines ...string) error {
+		server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+			response.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+			for _, line := range lines {
+				_, _ = fmt.Fprint(response, "data: "+line+"\n\n")
+			}
+			_, _ = fmt.Fprint(response, "data: [DONE]\n\n")
+		}))
+		defer server.Close()
+		client := newTestClient(t, server.URL+"/v1", AuthModeNone, nil, server.Client())
+		var kinds []llm.EventType
+		err := client.Stream(t.Context(), llm.Request{Messages: []llm.Message{{Role: llm.RoleUser, Text: "health"}}}, func(event llm.Event) error {
+			if event.Type == llm.EventTextDelta {
+				t.Errorf("text emitted: %q", event.TextDelta)
+			}
+			kinds = append(kinds, event.Type)
+			return nil
+		})
+		if err == nil && (len(kinds) != 2 || kinds[0] != llm.EventToolCall || kinds[1] != llm.EventCompleted) {
+			t.Errorf("got events %v", kinds)
+		}
+		return err
+	}
+	thinking := `{"choices":[{"index":0,"delta":{"content":[{"type":"thinking","thinking":[{"type":"text","text":"secret"}]}]},"finish_reason":null}]}`
+	call := `{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"cluster_health","arguments":"{}"}}]},"finish_reason":null}]}`
+	finish := `{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`
+	if err := stream(thinking, call, finish); err != nil {
+		t.Fatalf("thinking then tool calls: %v", err)
+	}
+	if err := stream(call, finish, thinking); err == nil {
+		t.Fatal("thinking after the finish reason accepted")
 	}
 }
 

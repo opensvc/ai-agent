@@ -109,17 +109,27 @@ func (c *deltaContent) UnmarshalJSON(data []byte) error {
 		return nil
 	}
 	var parts []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
+		Type string          `json:"type"`
+		Text json.RawMessage `json:"text"`
 	}
 	if err := json.Unmarshal(data, &parts); err != nil {
-		return fmt.Errorf("delta content is neither a string nor a list of parts")
+		return fmt.Errorf("decode delta content: %w", err)
 	}
+	var joined string
 	for _, part := range parts {
-		if part.Type == "text" {
-			c.text += part.Text
+		// Only a part of type text, exactly, is the answer: any other, the
+		// reasoning among them, is left out unread, even one holding a text
+		// field, and none can fail the turn.
+		if part.Type != "text" || len(part.Text) == 0 {
+			continue
 		}
+		var piece string
+		if err := json.Unmarshal(part.Text, &piece); err != nil {
+			return fmt.Errorf("decode delta content text part: %w", err)
+		}
+		joined += piece
 	}
+	c.text = joined
 	return nil
 }
 
