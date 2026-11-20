@@ -128,6 +128,7 @@ webapp origins, or `*` to allow all origins. Empty by default. See the
 | `OPENSVC_AI_CONVERSATION_DB_PATH` | `/var/lib/opensvc-ai-agent/conversations.db` | |
 | `OPENSVC_AI_CONVERSATION_LIFETIME` | `168h` | `1h` to `8760h` |
 | `OPENSVC_AI_FEEDBACK_RETENTION` | `4320h` (180 days) | `24h` to `26280h` |
+| `OPENSVC_AI_FEEDBACK_ENABLED` | `true` | `true` or `false`: `false` refuses the feedback of the users and tells the clients not to offer it; see [Feedback](docs/api.md#feedback) |
 | `OPENSVC_AI_CONVERSATION_MAX` | `4096` conversations for the instance | 1 to 1000000 |
 | `OPENSVC_AI_CONVERSATION_MAX_PER_USER` | `128`, or the instance limit if lower | 1 to the instance limit |
 | `OPENSVC_AI_CONVERSATION_MAX_DATABASE_MIB` | `256` | `32` to `1048576` |

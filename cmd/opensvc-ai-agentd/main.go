@@ -163,12 +163,16 @@ func main() {
 			log.Printf("close conversation store: %v", err)
 		}
 	}()
+	if !conversationConfig.FeedbackEnabled {
+		log.Printf("feedback: disabled, its routes answer 403 feedback_disabled")
+	}
 	auditLogger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	handler, err := api.NewHandler(backends, api.HandlerConfig{
 		MaxConcurrentAsks:        processConfig.MaxConcurrentAsks,
 		MaxConcurrentAsksPerUser: processConfig.MaxConcurrentAsksPerUser,
 		AuditLogger:              auditLogger,
 		CORSAllowedOrigins:       processConfig.CORSAllowedOrigins,
+		FeedbackDisabled:         !conversationConfig.FeedbackEnabled,
 	})
 	if err != nil {
 		_ = conversationStore.Close()

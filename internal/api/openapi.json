@@ -594,6 +594,16 @@
           "503": {
             "$ref": "#/components/responses/AuthenticationUnavailable"
           },
+          "403": {
+            "description": "The operator turned the feedback off (`OPENSVC_AI_FEEDBACK_ENABLED=false`). Codes: `feedback_disabled`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "The conversation or the turn does not exist, belongs to another identity or backend, or the turn has no feedback to delete. Codes: `feedback_target_not_found`.",
             "content": {
@@ -681,6 +691,16 @@
           },
           "503": {
             "$ref": "#/components/responses/AuthenticationUnavailable"
+          },
+          "403": {
+            "description": "The operator turned the feedback off (`OPENSVC_AI_FEEDBACK_ENABLED=false`). Codes: `feedback_disabled`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "404": {
             "description": "The conversation or the turn does not exist, belongs to another identity or backend, or the turn has no feedback to delete. Codes: `feedback_target_not_found`.",
@@ -969,7 +989,7 @@
         "tags": [
           "turns"
         ],
-        "summary": "What the runs route of the backend can do, as an AG-UI AgentCapabilities: SSE streaming, the tools of the MCP and of the client, and the interrupts of confirmations, without edits of the arguments.",
+        "summary": "What the runs route of the backend can do, as an AG-UI AgentCapabilities: SSE streaming, the tools of the MCP and of the client, the interrupts of confirmations with edits of the arguments, and in `custom.feedback` whether the turns take a feedback.",
         "responses": {
           "200": {
             "description": "The capabilities.",
@@ -1704,7 +1724,7 @@
       },
       "AgentCapabilities": {
         "type": "object",
-        "description": "The AG-UI AgentCapabilities of the agent: identity, transport, tools, humanInTheLoop and multimodal groups.",
+        "description": "The AG-UI AgentCapabilities of the agent: identity, transport, tools, humanInTheLoop and multimodal groups, and custom: `feedback`, always present, true, or false when the operator turned the feedback off.",
         "additionalProperties": true
       },
       "DisplayStep": {

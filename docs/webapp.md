@@ -123,7 +123,11 @@ gave it, when the agent kept it. See [the API](api.md#messages-snapshot).
 
 ## Feedback
 
-Under each assistant answer, offer 👍 and 👎. After a 👎, offer the optional
+Under each assistant answer, offer 👍 and 👎, unless
+`GET /v1/om3/capabilities` returns `custom.feedback` false: the operator
+turned the feedback off, and its routes return 403 `feedback_disabled`. An
+agent older than the setting returns no `custom`: the feedback is on.
+After a 👎, offer the optional
 reasons and a free text field "What did you expect?", then send them with
 `PUT /v1/om3/conversations/{id}/turns/{turn_id}/feedback`, using the
 `turn_id` of the message, or the `result.turnId` of `RUN_FINISHED` for an
@@ -138,7 +142,9 @@ answer just streamed:
 | Expected action not done | `action_not_done` |
 
 `feedback` on the assistant messages of a page restores the choice after a
-reload; `DELETE` on the same path withdraws it. Tell the user that their
+reload; `DELETE` on the same path withdraws it. With the feedback off, the
+messages still carry the feedback given before: show it read-only, or not at
+all, since changing or withdrawing it is refused. Tell the user that their
 feedback and the exchange it rates are kept to improve the assistant, without
 their identity. See [the API](api.md#feedback) for the limits.
 
