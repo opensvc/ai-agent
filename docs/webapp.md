@@ -246,8 +246,12 @@ the run with `RUN_FINISHED`, `outcome` `interrupt`:
 
 Show the tool, its title and its exact arguments, the `TOOL_CALL_ARGS` of
 the `toolCallId`, which are the call that runs if the user approves: never
-the model text, which can describe the action differently. The confirmation
-expires after 10 minutes.
+the model text, which can describe the action differently. The model is told
+to write before the call what leads to it and what it will change, after the
+answer to a question of the same message: its `TEXT_MESSAGE_*` events come
+before `TOOL_CALL_START`. Show that text above the confirmation, as its
+explanation; the arguments alone say what runs. The confirmation expires
+after 10 minutes.
 
 `argumentTypes`, when present, gives the media type of text arguments, as
 the input schema of the tool declares them in `contentMediaType`, such as
@@ -305,7 +309,9 @@ another interrupt when the model calls a further destructive tool.
   `argument_types`, `editable`, `input_schema`, `expires_at`, and `preview`,
   `preview_error` and `preview_arguments` when the interrupt gave them,
   while it waits: show it again after a page reload, editable when it was, and answer
-  it with its `id` as the `interruptId`.
+  it with its `id` as the `interruptId`. It holds the call, not the text the
+  model wrote before it: after a reload, the confirmation comes back without
+  its explanation.
 - A prompt returns 409 `conversation_busy` until the user decides or the
   confirmation expires; an expired one no longer blocks the conversation.
 - A pending confirmation survives an agent restart.
