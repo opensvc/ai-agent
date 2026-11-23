@@ -136,7 +136,7 @@ func TestConfirmationFlowSuspendsStoresAndResumesATurn(t *testing.T) {
 			if err != nil || len(stored.Runs) != 1 || stored.Runs[0].AgentVersion != "v1.0.0" || stored.Runs[0].Model != "gpt-test" ||
 				stored.Runs[0].MCPServer != "flow-mcp" || stored.Runs[0].MCPVersion != "v2" || len(stored.Runs[0].ToolsSHA256) != 64 ||
 				len(stored.Runs[0].SystemPromptSHA256) != 64 || stored.Runs[0].ToolSearch || len(stored.Runs[0].ShownTools) == 0 ||
-				stored.Runs[0].History == nil || stored.Runs[0].History.Policy != "v1" {
+				stored.Runs[0].History == nil || stored.Runs[0].History.Policy != "v2" {
 				t.Fatalf("turn runs = %+v, %v", stored.Runs, err)
 			}
 		})

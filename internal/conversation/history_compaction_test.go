@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/opensvc/ai-agent/internal/agent"
 	"github.com/opensvc/ai-agent/internal/llm"
 )
 
@@ -100,7 +102,7 @@ func TestCompactHistoryCompactsAStructuredResult(t *testing.T) {
 		t.Fatalf("compacted result holds %d bytes", len(result.Content))
 	}
 	structured, marker := decodeCompacted(t, result.Content)
-	if marker.Policy != "v1" || !marker.Partial || marker.OriginalBytes != len(original) {
+	if marker.Policy != "v2" || !marker.Partial || marker.OriginalBytes != len(original) {
 		t.Fatalf("marker = %+v", marker)
 	}
 	// The scalars, the count as the tool returned it, and the nested
@@ -226,7 +228,7 @@ func TestPrepareHistoryDescribesTheHistorySent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stats.Policy != "v1" || stats.MaxResultBytes != 2<<10 || stats.MaxHistoryResultBytes != 16<<10 || stats.CompactedResults != 2 ||
+	if stats.Policy != "v2" || stats.MaxResultBytes != 2<<10 || stats.MaxHistoryResultBytes != 16<<10 || stats.CompactedResults != 2 ||
 		stats.LoadedBytes != historySize(history) || stats.CompactedBytes >= stats.LoadedBytes || stats.SentBytes != historySize(sent) || stats.RemovedTurns != 0 {
 		t.Fatalf("stats = %+v", stats)
 	}
@@ -531,4 +533,181 @@ func TestCompactHistoryKeepsASearchResultWhole(t *testing.T) {
 		}
 	}
 	t.Fatalf("the search turn was left out: %+v", stats)
+}
+
+// textResult is a result of a tool of text alone, as search_docs gives.
+func textResult(size int) json.RawMessage {
+	return json.RawMessage(`{"content":[{"type":"text","text":"` + strings.Repeat("d", size) + `"}]}`)
+}
+
+// named gives the calls of a turn the name of a tool.
+func named(turn []llm.Message, name string) []llm.Message {
+	for i := range turn[1].ToolCalls {
+		turn[1].ToolCalls[i].Name = name
+	}
+	return turn
+}
+
+func TestCompactHistoryReducesTextResultsBeforeLeavingATurnOut(t *testing.T) {
+	// The turn of 2026-11-23 on dev1: three searches of the documentation
+	// of 10 to 17 KiB, over the budget of the whole history alone.
+	docs := named(turnWith("how to declare an md disk", llm.ToolResult{CallID: "a", Content: textResult(10000)},
+		llm.ToolResult{CallID: "b", Content: textResult(17000)}, llm.ToolResult{CallID: "c", Content: textResult(13000)}), "search_docs")
+	history := append(turnWith("is there a problem", llm.ToolResult{CallID: "s", Content: structuredResult(t, disks(24), true)}), docs...)
+	compacted, stats, indexes := compactHistory(history, HistoryCompaction{})
+	if stats.RemovedTurns != 0 || len(compacted) != len(history) || compacted[0].Text != "is there a problem" || compacted[4].Text != "how to declare an md disk" {
+		t.Fatalf("turns left out: %+v, %d messages", stats, len(compacted))
+	}
+	if total := resultBytes(compacted); total > DefaultHistoryCompaction.MaxHistoryResultBytes {
+		t.Fatalf("results hold %d bytes", total)
+	}
+	// The oldest texts are reduced first, to a marker of their contents.
+	_, marker := decodeCompacted(t, compacted[6].ToolResults[0].Content)
+	if marker.Policy != HistoryCompactionPolicy || marker.OriginalBytes != len(textResult(10000)) || len(marker.Omissions) != 1 ||
+		marker.Omissions[0] != (omission{Path: "/content", Kind: omittedArrayTail, Omitted: 1}) {
+		t.Fatalf("text marker = %+v", marker)
+	}
+	if !json.Valid(compacted[6].ToolResults[0].Content) || len(indexes) != stats.CompactedResults {
+		t.Fatalf("indexes %v, stats %+v", indexes, stats)
+	}
+	// The room the texts free goes back to the structured result.
+	if value, _ := decodeCompacted(t, compacted[2].ToolResults[0].Content); value["disks"] == nil {
+		t.Fatalf("the structured result stayed a marker: %s", compacted[2].ToolResults[0].Content)
+	}
+	// Calls and arguments stay: the model knows what it searched.
+	if !reflect.DeepEqual(compacted[5].ToolCalls, history[5].ToolCalls) {
+		t.Fatal("the calls of the searches changed")
+	}
+}
+
+func TestCompactHistoryKeepsATextThatFits(t *testing.T) {
+	// The structured results are reduced first: a text that then fits
+	// stays whole.
+	var results []llm.ToolResult
+	for i := range 6 {
+		results = append(results, llm.ToolResult{CallID: fmt.Sprint("s", i), Content: structuredResult(t, disks(24), true)})
+	}
+	docs := named(turnWith("search", llm.ToolResult{CallID: "d", Content: textResult(9000)}), "search_docs")
+	history := append(docs, turnWith("disks", results...)...)
+	compacted, stats, _ := compactHistory(history, HistoryCompaction{})
+	if stats.RemovedTurns != 0 || string(compacted[2].ToolResults[0].Content) != string(history[2].ToolResults[0].Content) {
+		t.Fatalf("the text was reduced: %+v", stats)
+	}
+}
+
+func TestCompactHistoryNeverLeavesTheLastTurnOut(t *testing.T) {
+	// A last turn over the budget alone, by results kept whole: it is sent,
+	// over the budget, rather than no history, and the turn before it,
+	// reduced to markers, is kept: leaving it out would not bring the
+	// results under the budget.
+	search := named(turnWith("find a tool", llm.ToolResult{CallID: "t", Content: textResult(20000)}), agent.SearchToolName)
+	history := append(turnWith("first", llm.ToolResult{CallID: "a", Content: textResult(8000)}), search...)
+	compacted, stats, _ := compactHistory(history, HistoryCompaction{})
+	if stats.RemovedTurns != 0 || len(compacted) != 8 || compacted[0].Text != "first" {
+		t.Fatalf("removed %d turns, %d messages", stats.RemovedTurns, len(compacted))
+	}
+	if string(compacted[6].ToolResults[0].Content) != string(search[2].ToolResults[0].Content) {
+		t.Fatal("the search_tools result was compacted")
+	}
+	if _, marker := decodeCompacted(t, compacted[2].ToolResults[0].Content); marker.OriginalBytes != len(textResult(8000)) {
+		t.Fatalf("the former text was not reduced: %s", compacted[2].ToolResults[0].Content)
+	}
+}
+
+func TestCompactHistoryKeepsTheTurnsBeforeALastTurnOverTheBudget(t *testing.T) {
+	small := func(id string) llm.ToolResult {
+		return llm.ToolResult{CallID: id, Content: structuredResult(t, `{"node":"dev5n1","status":"up"}`, false)}
+	}
+	failed := func(id string) llm.ToolResult {
+		return llm.ToolResult{CallID: id, IsError: true, Content: json.RawMessage(`{"content":[{"type":"text","text":"` + strings.Repeat("e", 17000) + `"}]}`)}
+	}
+	history := append(append(turnWith("first", small("a")), turnWith("second", small("b"))...), turnWith("third", failed("c"))...)
+	compacted, stats, _ := compactHistory(history, HistoryCompaction{})
+	if stats.RemovedTurns != 0 || len(compacted) != len(history) {
+		t.Fatalf("removed %d turns, %d messages", stats.RemovedTurns, len(compacted))
+	}
+	// Turns whose own results exceed the budget are still left out.
+	history = append(turnWith("large", failed("d")), history...)
+	compacted, stats, _ = compactHistory(history, HistoryCompaction{})
+	if stats.RemovedTurns != 1 || compacted[0].Text != "first" {
+		t.Fatalf("removed %d turns, first %q", stats.RemovedTurns, compacted[0].Text)
+	}
+}
+
+func TestCompactHistoryRestoresTheStructuredResultsAMarkerFrees(t *testing.T) {
+	// A text over the budget alone is reduced to a marker; the structured
+	// results of the last turn are then compacted to their budget, not to a
+	// marker.
+	docs := named(turnWith("docs", llm.ToolResult{CallID: "d", Content: textResult(17000)}), "search_docs")
+	var results []llm.ToolResult
+	for i := range 3 {
+		results = append(results, llm.ToolResult{CallID: fmt.Sprint("s", i), Content: structuredResult(t, disks(24), true)})
+	}
+	history := append(docs, turnWith("disks", results...)...)
+	compacted, stats, _ := compactHistory(history, HistoryCompaction{})
+	if stats.RemovedTurns != 0 || resultBytes(compacted) > DefaultHistoryCompaction.MaxHistoryResultBytes {
+		t.Fatalf("stats %+v, results hold %d bytes", stats, resultBytes(compacted))
+	}
+	if _, marker := decodeCompacted(t, compacted[2].ToolResults[0].Content); marker.OriginalBytes != len(textResult(17000)) {
+		t.Fatalf("the text was not reduced: %d bytes", len(compacted[2].ToolResults[0].Content))
+	}
+	for _, result := range compacted[6].ToolResults {
+		if value, _ := decodeCompacted(t, result.Content); value["disks"] == nil || len(result.Content) > DefaultHistoryCompaction.MaxResultBytes {
+			t.Fatalf("the structured result was not compacted to its budget: %s", result.Content)
+		}
+	}
+}
+
+func TestCompactHistoryReadsTheToolOfEachTurn(t *testing.T) {
+	// Some providers number their calls from zero in each answer: the name
+	// of a result's tool is the one of the call before it.
+	search := named(turnWith("find", llm.ToolResult{CallID: "call_0", Content: textResult(3000)}), agent.SearchToolName)
+	docs := named(turnWith("docs", llm.ToolResult{CallID: "call_0", Content: textResult(17000)}), "search_docs")
+	for _, order := range [][2][]llm.Message{{search, docs}, {docs, search}} {
+		history := append(slices.Clone(order[0]), order[1]...)
+		compacted, stats, _ := compactHistory(history, HistoryCompaction{})
+		if stats.RemovedTurns != 0 || len(compacted) != 8 {
+			t.Fatalf("removed %d turns", stats.RemovedTurns)
+		}
+		for i, message := range compacted {
+			if len(message.ToolResults) == 0 {
+				continue
+			}
+			whole := string(message.ToolResults[0].Content) == string(history[i].ToolResults[0].Content)
+			if isSearch := history[i-1].ToolCalls[0].Name == agent.SearchToolName; whole != isSearch {
+				t.Fatalf("%s result kept whole: %v", history[i-1].ToolCalls[0].Name, whole)
+			}
+		}
+	}
+}
+
+func TestCompactHistoryReducesTheFormerSearches(t *testing.T) {
+	// The agent reads back the searches of the last turn that searched:
+	// those of the turns before are reduced rather than turns left out.
+	var history []llm.Message
+	for turn := range 5 {
+		history = append(history, named(turnWith(fmt.Sprint("q", turn),
+			llm.ToolResult{CallID: fmt.Sprint(turn, "a"), Content: textResult(3500)},
+			llm.ToolResult{CallID: fmt.Sprint(turn, "b"), Content: textResult(3500)}), agent.SearchToolName)...)
+	}
+	compacted, stats, _ := compactHistory(history, HistoryCompaction{})
+	if stats.RemovedTurns != 0 || compacted[0].Text != "q0" || resultBytes(compacted) > DefaultHistoryCompaction.MaxHistoryResultBytes {
+		t.Fatalf("stats %+v, results hold %d bytes", stats, resultBytes(compacted))
+	}
+	if !reflect.DeepEqual(compacted[len(compacted)-2].ToolResults, history[len(history)-2].ToolResults) {
+		t.Fatal("the searches of the last turn were reduced")
+	}
+}
+
+func TestTextMarkerTakesTextsAlone(t *testing.T) {
+	policy := DefaultHistoryCompaction
+	mixed := json.RawMessage(`{"content":[{"type":"text","text":"a"},{"type":"image","data":"AAAA","mimeType":"image/png"}]}`)
+	if _, ok := policy.textMarker(mixed); ok {
+		t.Fatal("a result with an image was reduced")
+	}
+	// The envelope of an MCP result, isError included, is reduced.
+	mcp := json.RawMessage(`{"content":[{"type":"text","text":"` + strings.Repeat("d", 4000) + `"}],"isError":false}`)
+	if content, ok := policy.textMarker(mcp); !ok || !json.Valid(content) || len(content) >= len(mcp) {
+		t.Fatalf("the MCP text result was not reduced: %s", content)
+	}
 }
