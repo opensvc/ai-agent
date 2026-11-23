@@ -109,7 +109,7 @@ func TestFeedbackDisabled(t *testing.T) {
 		},
 	}
 	handler, err := NewHandler([]Backend{{Name: "om3", Conversations: service, Authenticator: allowTestTokenVerifier()}},
-		HandlerConfig{MaxConcurrentAsks: 4, AuditLogger: discardAuditLogger(), FeedbackDisabled: true})
+		HandlerConfig{Models: testModels(), MaxConcurrentAsks: 4, AuditLogger: discardAuditLogger(), FeedbackDisabled: true})
 	if err != nil {
 		t.Fatal(err)
 	}

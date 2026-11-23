@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -68,7 +69,7 @@ func aguiFrames(events []agui.Event) ([]byte, error) {
 // serveConversationRun runs the agent on a conversation for an AG-UI
 // client: a new prompt, the last message of the user, or the resume of the
 // confirmation the conversation waits on. The stream speaks AG-UI.
-func serveConversationRun(backend string, service ConversationService, limiter *askLimiter, audit auditLogger) http.HandlerFunc {
+func serveConversationRun(backend string, service ConversationService, models *llm.Models, limiter *askLimiter, audit auditLogger) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		id := request.PathValue("id")
 		attributes := []slog.Attr{slog.String("conversation_id", boundedAuditID(id))}
@@ -234,6 +235,15 @@ func serveConversationRun(backend string, service ConversationService, limiter *
 			}
 			execution = prepared
 		default:
+			// A new turn runs on the model the client chose, checked before
+			// the conversation is read; a resumed turn keeps its own.
+			model, err := resolveModel(request.Context(), models, input)
+			if err != nil {
+				reject(http.StatusBadRequest, &APIError{Code: "model_unknown", Message: err.Error()})
+				return
+			}
+			runContext = agent.WithModel(runContext, model.ID)
+			attributes = append(attributes, slog.String("model_id", model.ID))
 			text, skipped, err := input.Prompt()
 			prompt = text
 			if err != nil {
@@ -362,11 +372,56 @@ func decodeRunRequest(response http.ResponseWriter, request *http.Request, id st
 	return input, 0, nil
 }
 
+// resolveModel is the model the client chose in the input of a run, the
+// default when it chose none; an error names the model unknown.
+func resolveModel(ctx context.Context, models *llm.Models, input agui.RunAgentInput) (llm.Model, error) {
+	id, err := input.Model()
+	if err != nil {
+		return llm.Model{}, err
+	}
+	model, err := models.Resolve(ctx, id)
+	if errors.Is(err, llm.ErrModelUnknown) {
+		return llm.Model{}, fmt.Errorf("forwardedProps.model is not a model of the agent; GET /models lists them")
+	}
+	return model, err
+}
+
+// ModelList is the answer of GET /models: the models the runs choose from,
+// the default first.
+type ModelList struct {
+	Models []ModelEntry `json:"models"`
+}
+
+// ModelEntry is a model a run can choose, by its ID: its label, whether it
+// is the default, and whether the caller can run on it.
+type ModelEntry struct {
+	ID      string `json:"id"`
+	Label   string `json:"label"`
+	Default bool   `json:"default"`
+	Ready   bool   `json:"ready"`
+}
+
+// serveModels lists the models a run of the caller chooses from, by their
+// ID and label only: neither their provider, nor their URL, nor their
+// authentication leave the agent.
+func serveModels(models *llm.Models) http.HandlerFunc {
+	return func(response http.ResponseWriter, request *http.Request) {
+		list := models.List(request.Context())
+		answer := ModelList{Models: make([]ModelEntry, 0, len(list))}
+		for index, model := range list {
+			answer.Models = append(answer.Models, ModelEntry{ID: model.ID, Label: model.Label, Default: index == 0, Ready: true})
+		}
+		response.Header().Set("Cache-Control", "no-store")
+		writeJSON(response, http.StatusOK, answer)
+	}
+}
+
 // agentCapabilities is the AG-UI AgentCapabilities the runs route honours:
 // it streams over SSE, calls the tools of its MCP and accepts the tools of
 // the client, and pauses for approvals with interrupts, with edits of the
 // arguments. Its custom group tells whether the turns take a feedback, for
-// the client to offer it or not.
+// the client to offer it or not, and that the runs choose their model among
+// those of GET /models.
 func agentCapabilities(feedbackDisabled bool) map[string]any {
 	return map[string]any{
 		"identity":       map[string]any{"name": "OpenSVC AI agent", "type": "opensvc-ai-agent", "provider": "OpenSVC", "version": buildinfo.Version()},
@@ -374,7 +429,7 @@ func agentCapabilities(feedbackDisabled bool) map[string]any {
 		"tools":          map[string]any{"supported": true, "clientProvided": true},
 		"humanInTheLoop": map[string]any{"supported": true, "approvals": true, "interrupts": true, "approveWithEdits": true},
 		"multimodal":     map[string]any{"input": map[string]any{"image": false, "audio": false, "video": false, "pdf": false, "file": false}},
-		"custom":         map[string]any{"feedback": !feedbackDisabled},
+		"custom":         map[string]any{"feedback": !feedbackDisabled, "models": true},
 	}
 }
 

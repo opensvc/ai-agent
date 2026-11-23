@@ -10,6 +10,7 @@ import (
 
 	"github.com/opensvc/ai-agent/internal/auth"
 	"github.com/opensvc/ai-agent/internal/conversation"
+	"github.com/opensvc/ai-agent/internal/llm"
 )
 
 // openAPIDocument describes the routes of every backend. A test keeps it equal
@@ -32,6 +33,8 @@ type HandlerConfig struct {
 	// FeedbackDisabled refuses the feedback routes of every backend and
 	// tells so in their capabilities; the zero value serves them.
 	FeedbackDisabled bool
+	// Models are the models the runs of every backend choose from.
+	Models *llm.Models
 }
 
 // Backend is one product the agent serves under /v1/{Name}. Its routes
@@ -73,6 +76,9 @@ func NewHandler(backends []Backend, config HandlerConfig) (http.Handler, error) 
 	if config.AuditLogger == nil {
 		return nil, fmt.Errorf("API audit logger is nil")
 	}
+	if config.Models == nil {
+		return nil, fmt.Errorf("API models are nil")
+	}
 	if config.MaxConcurrentAsksPerUser == 0 {
 		config.MaxConcurrentAsksPerUser = config.MaxConcurrentAsks
 	}
@@ -97,7 +103,7 @@ func NewHandler(backends []Backend, config HandlerConfig) (http.Handler, error) 
 			return nil, fmt.Errorf("API backend %s authenticator is nil", backend.Name)
 		}
 		headers = append(headers, backend.Authenticator.Headers()...)
-		registerBackend(mux, backend, config.FeedbackDisabled, limiter, auditLogger{logger: config.AuditLogger.With(slog.String("backend", backend.Name))})
+		registerBackend(mux, backend, config.FeedbackDisabled, config.Models, limiter, auditLogger{logger: config.AuditLogger.With(slog.String("backend", backend.Name))})
 	}
 	handler, err := withCORS(mux, config.CORSAllowedOrigins, headers)
 	if err != nil {
@@ -113,7 +119,7 @@ type backendRoute struct {
 	handler http.Handler
 }
 
-func backendRoutes(backend string, conversations ConversationService, tools ToolLister, runner UnattendedRunner, feedbackDisabled bool, limiter *askLimiter, audit auditLogger) []backendRoute {
+func backendRoutes(backend string, conversations ConversationService, tools ToolLister, runner UnattendedRunner, feedbackDisabled bool, models *llm.Models, limiter *askLimiter, audit auditLogger) []backendRoute {
 	var putFeedback, deleteFeedback http.HandlerFunc
 	if feedbackDisabled {
 		putFeedback, deleteFeedback = serveFeedbackDisabled(audit), serveFeedbackDisabled(audit)
@@ -127,18 +133,19 @@ func backendRoutes(backend string, conversations ConversationService, tools Tool
 		{"GET", "/conversations/{id}/messages", serveConversationMessages(conversations, audit)},
 		{"PATCH", "/conversations/{id}", serveUpdateConversationTitle(conversations, audit)},
 		{"DELETE", "/conversations/{id}", serveDeleteConversation(conversations, audit)},
-		{"POST", "/conversations/{id}/runs", serveConversationRun(backend, conversations, limiter, audit)},
-		{"POST", "/runs", serveUnattendedRun(backend, runner, limiter, audit)},
+		{"POST", "/conversations/{id}/runs", serveConversationRun(backend, conversations, models, limiter, audit)},
+		{"POST", "/runs", serveUnattendedRun(backend, runner, models, limiter, audit)},
 		{"GET", "/capabilities", serveCapabilities(feedbackDisabled)},
+		{"GET", "/models", serveModels(models)},
 		{"GET", "/tools", serveTools(tools, audit)},
 		{"PUT", "/conversations/{id}/turns/{turn_id}/feedback", putFeedback},
 		{"DELETE", "/conversations/{id}/turns/{turn_id}/feedback", deleteFeedback},
 	}
 }
 
-func registerBackend(mux *http.ServeMux, backend Backend, feedbackDisabled bool, limiter *askLimiter, audit auditLogger) {
+func registerBackend(mux *http.ServeMux, backend Backend, feedbackDisabled bool, models *llm.Models, limiter *askLimiter, audit auditLogger) {
 	prefix := "/v1/" + backend.Name
-	for _, route := range backendRoutes(backend.Name, backend.Conversations, backend.Tools, backend.Runner, feedbackDisabled, limiter, audit) {
+	for _, route := range backendRoutes(backend.Name, backend.Conversations, backend.Tools, backend.Runner, feedbackDisabled, models, limiter, audit) {
 		mux.Handle(route.method+" "+prefix+route.path, requireAccessToken(backend.Authenticator, audit, route.handler))
 	}
 }

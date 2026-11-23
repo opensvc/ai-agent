@@ -25,7 +25,7 @@ func (f runnerFunc) RunTurn(ctx context.Context, history []llm.Message, prompt s
 func newUnattendedHandler(t *testing.T, runner UnattendedRunner, maxConcurrentAsks int) http.Handler {
 	t.Helper()
 	handler, err := NewHandler([]Backend{{Name: "om3", Conversations: turnService{}, Authenticator: allowTestTokenVerifier(), Runner: runner}},
-		HandlerConfig{MaxConcurrentAsks: maxConcurrentAsks, AuditLogger: discardAuditLogger()})
+		HandlerConfig{Models: testModels(), MaxConcurrentAsks: maxConcurrentAsks, AuditLogger: discardAuditLogger()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestUnattendedRunGivesTheContextToTheTurn(t *testing.T) {
 	})
 	var output bytes.Buffer
 	handler, err := NewHandler([]Backend{{Name: "om3", Conversations: turnService{}, Authenticator: allowTestTokenVerifier(), Runner: runner}},
-		HandlerConfig{MaxConcurrentAsks: 1, AuditLogger: slog.New(slog.NewJSONHandler(&output, nil))})
+		HandlerConfig{Models: testModels(), MaxConcurrentAsks: 1, AuditLogger: slog.New(slog.NewJSONHandler(&output, nil))})
 	if err != nil {
 		t.Fatal(err)
 	}

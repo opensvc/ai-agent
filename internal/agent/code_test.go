@@ -142,7 +142,7 @@ func TestSearchCodeRunsInATurn(t *testing.T) {
 			)
 		},
 	}}
-	agent, err := New(model, func(context.Context) (MCPSession, error) { return session, nil },
+	agent, err := New(llm.SingleModel(model, "test-model"), func(context.Context) (MCPSession, error) { return session, nil },
 		Config{SystemPrompt: testSystemPrompt, MaxIterations: 3, Timeout: time.Minute, Code: Codes{Shelf: shelf}})
 	if err != nil {
 		t.Fatal(err)
@@ -168,7 +168,7 @@ func TestSearchCodeRunsInATurn(t *testing.T) {
 func TestAnMCPToolNamedSearchCodeFailsTheTurn(t *testing.T) {
 	session := &fakeSession{tools: []*mcp.Tool{{Name: SearchCodeToolName, InputSchema: objectSchema()}}}
 	model := &scriptedLLM{t: t}
-	agent, err := New(model, func(context.Context) (MCPSession, error) { return session, nil },
+	agent, err := New(llm.SingleModel(model, "test-model"), func(context.Context) (MCPSession, error) { return session, nil },
 		Config{SystemPrompt: testSystemPrompt, MaxIterations: 3, Timeout: time.Minute, Code: Codes{Shelf: &codeShelfOf{}}})
 	if err != nil {
 		t.Fatal(err)
@@ -199,7 +199,7 @@ func TestADocsSearchPointsToTheCodeOnlyWhenItCanBeSearched(t *testing.T) {
 				return emitEvents(emit, llm.Event{Type: llm.EventTextDelta, TextDelta: "Two."}, llm.Event{Type: llm.EventCompleted, FinishReason: llm.FinishReasonCompleted})
 			},
 		}}
-		agent, err := New(model, func(context.Context) (MCPSession, error) { return &fakeSession{}, nil }, config)
+		agent, err := New(llm.SingleModel(model, "test-model"), func(context.Context) (MCPSession, error) { return &fakeSession{}, nil }, config)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -242,7 +242,7 @@ func TestCodeSearchesOfAQuestionAreBounded(t *testing.T) {
 			)
 		},
 	}}
-	agent, err := New(model, func(context.Context) (MCPSession, error) { return session, nil },
+	agent, err := New(llm.SingleModel(model, "test-model"), func(context.Context) (MCPSession, error) { return session, nil },
 		Config{SystemPrompt: testSystemPrompt, MaxIterations: 4, Timeout: time.Minute, Code: Codes{Shelf: shelf}})
 	if err != nil {
 		t.Fatal(err)
@@ -318,7 +318,7 @@ func TestCodeVersionReadIsAudited(t *testing.T) {
 			return emitEvents(emit, llm.Event{Type: llm.EventTextDelta, TextDelta: "done"}, llm.Event{Type: llm.EventCompleted, FinishReason: llm.FinishReasonCompleted})
 		},
 	}}
-	agent, err := New(model, func(context.Context) (MCPSession, error) { return session, nil },
+	agent, err := New(llm.SingleModel(model, "test-model"), func(context.Context) (MCPSession, error) { return session, nil },
 		Config{SystemPrompt: testSystemPrompt, MaxIterations: 3, Timeout: time.Minute, Code: codes})
 	if err != nil {
 		t.Fatal(err)

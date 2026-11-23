@@ -795,7 +795,7 @@
             "$ref": "#/components/responses/AuthenticationUnavailable"
           },
           "400": {
-            "description": "The body is not a RunAgentInput, its threadId is not the conversation, its runId is invalid, the tools of the client are invalid, the tool messages do not answer the calls waiting, the last message is not a text of the user, or the resume is invalid, or the context of the interface is invalid. Codes: `invalid_request`, `invalid_protocol_version`, `unsupported_protocol_version`, `thread_mismatch`, `invalid_run_id`, `invalid_tools`, `invalid_tool_results`, `invalid_prompt`, `invalid_decision`, `invalid_edited_arguments`, `invalid_context`.",
+            "description": "The body is not a RunAgentInput, its threadId is not the conversation, its runId is invalid, the tools of the client are invalid, the tool messages do not answer the calls waiting, the last message is not a text of the user, or the resume is invalid, or the context of the interface is invalid, or the model of a new turn is not one of the agent. Codes: `invalid_request`, `invalid_protocol_version`, `unsupported_protocol_version`, `thread_mismatch`, `invalid_run_id`, `invalid_tools`, `invalid_tool_results`, `invalid_prompt`, `invalid_decision`, `invalid_edited_arguments`, `invalid_context`, `model_unknown`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -917,7 +917,7 @@
             "$ref": "#/components/responses/AuthenticationUnavailable"
           },
           "400": {
-            "description": "The body is not a RunAgentInput, its runId or threadId is invalid, it offers tools of the client, it resumes, it does not hold exactly one message of the user with text, or its context is invalid. Codes: `invalid_request`, `invalid_protocol_version`, `unsupported_protocol_version`, `invalid_run_id`, `invalid_thread_id`, `invalid_tools`, `invalid_decision`, `invalid_prompt`, `invalid_context`.",
+            "description": "The body is not a RunAgentInput, its runId or threadId is invalid, it offers tools of the client, it resumes, it does not hold exactly one message of the user with text, or its context is invalid, or its model is not one of the agent. Codes: `invalid_request`, `invalid_protocol_version`, `unsupported_protocol_version`, `invalid_run_id`, `invalid_thread_id`, `invalid_tools`, `invalid_decision`, `invalid_prompt`, `invalid_context`, `model_unknown`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -989,7 +989,7 @@
         "tags": [
           "turns"
         ],
-        "summary": "What the runs route of the backend can do, as an AG-UI AgentCapabilities: SSE streaming, the tools of the MCP and of the client, the interrupts of confirmations with edits of the arguments, and in `custom.feedback` whether the turns take a feedback.",
+        "summary": "What the runs route of the backend can do, as an AG-UI AgentCapabilities: SSE streaming, the tools of the MCP and of the client, the interrupts of confirmations with edits of the arguments, in `custom.feedback` whether the turns take a feedback, and in `custom.models` that the runs choose their model among those of `GET /v1/{backend}/models`.",
         "responses": {
           "200": {
             "description": "The capabilities.",
@@ -997,6 +997,44 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AgentCapabilities"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "503": {
+            "$ref": "#/components/responses/AuthenticationUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/{backend}/models": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/Backend"
+        },
+        {
+          "$ref": "#/components/parameters/ClusterID"
+        },
+        {
+          "$ref": "#/components/parameters/Node"
+        }
+      ],
+      "get": {
+        "operationId": "listModels",
+        "tags": [
+          "turns"
+        ],
+        "summary": "The models the runs of the caller choose from, the default first: their ID, which `forwardedProps.model` names, and their label. Their provider, URL and authentication do not leave the agent. The operator declares them; the list is the same for every backend and every user.",
+        "responses": {
+          "200": {
+            "description": "The models.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelList"
                 }
               }
             }
@@ -1446,6 +1484,10 @@
               }
             },
             "description": "On the last assistant message of a turn, its tokens."
+          },
+          "model_id": {
+            "type": "string",
+            "description": "On the last assistant message of a turn, the ID of the model the turn last ran on, for the client to offer it again; absent for a turn recorded before runs had it."
           }
         }
       },
@@ -1561,7 +1603,7 @@
       },
       "RunAgentInput": {
         "type": "object",
-        "description": "The AG-UI RunAgentInput. The agent reads threadId, runId, the tools of the client, the context of the interface, the last message, which must be a message of the user unless the input ends with tool messages answering the calls of the tools of the client, and resume; it keeps its own history, and does not read the other messages, the state or the forwarded properties.",
+        "description": "The AG-UI RunAgentInput. The agent reads threadId, runId, the tools of the client, the context of the interface, the last message, which must be a message of the user unless the input ends with tool messages answering the calls of the tools of the client, and resume; it keeps its own history, and does not read the other messages or the state; of the forwarded properties, it reads `model` only.",
         "required": [
           "threadId",
           "runId",
@@ -1718,14 +1760,76 @@
           "protocolVersion": {
             "type": "string",
             "description": "The version of AG-UI the client speaks, MAJOR.MINOR: a newer minor of the line 1 is served with a warning, another major line refused."
+          },
+          "forwardedProps": {
+            "description": "Properties for the agent, read when an object. `model`, the ID of a model `GET /v1/{backend}/models` lists, chooses the model a new turn runs on, from its start to its end; absent, null, or with no `forwardedProps` object, the default model. A resumed turn keeps the model it started on, or runs on the default when the operator removed it, and the `model` of its run is not read. Other members are ignored.",
+            "properties": {
+              "model": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "minLength": 1,
+                "maxLength": 64
+              }
+            }
           }
         },
         "additionalProperties": true
       },
       "AgentCapabilities": {
         "type": "object",
-        "description": "The AG-UI AgentCapabilities of the agent: identity, transport, tools, humanInTheLoop and multimodal groups, and custom: `feedback`, always present, true, or false when the operator turned the feedback off.",
+        "description": "The AG-UI AgentCapabilities of the agent: identity, transport, tools, humanInTheLoop and multimodal groups, and custom: `feedback`, always present, true, or false when the operator turned the feedback off; `models`, true: the runs choose their model, in `forwardedProps.model`, among those of `GET /v1/{backend}/models`. An agent without `models` offers no choice.",
         "additionalProperties": true
+      },
+      "ModelList": {
+        "type": "object",
+        "required": [
+          "models"
+        ],
+        "properties": {
+          "models": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 16,
+            "items": {
+              "$ref": "#/components/schemas/Model"
+            },
+            "description": "The models, the default first."
+          }
+        }
+      },
+      "Model": {
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "default",
+          "ready"
+        ],
+        "description": "A model a run can choose.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "The ID of the model, opaque to the client: `default` for the default model."
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "The name the interfaces show."
+          },
+          "default": {
+            "type": "boolean",
+            "description": "Whether it is the model of a run that names none."
+          },
+          "ready": {
+            "type": "boolean",
+            "description": "Whether the caller can run on it; a model that is not, the interfaces show without offering it."
+          }
+        }
       },
       "DisplayStep": {
         "type": "object",
@@ -1857,7 +1961,7 @@
       },
       "UnattendedRunInput": {
         "type": "object",
-        "description": "The AG-UI RunAgentInput of an unattended run: threadId and runId name the run for the client and the audit, nothing is stored under them; messages holds one message of the user; tools must be empty or absent, resume absent; context, optional, scopes the question as for a conversation run. The other members are not read.",
+        "description": "The AG-UI RunAgentInput of an unattended run: threadId and runId name the run for the client and the audit, nothing is stored under them; messages holds one message of the user; tools must be empty or absent, resume absent; context, optional, scopes the question as for a conversation run, and forwardedProps.model, optional, chooses its model. The other members are not read.",
         "required": [
           "threadId",
           "runId",
@@ -1926,6 +2030,19 @@
           "tools": {
             "type": "array",
             "maxItems": 0
+          },
+          "forwardedProps": {
+            "description": "Properties for the agent, read when an object: `model`, the ID of a model `GET /v1/{backend}/models` lists, chooses the model of the run; absent, the default model. Other members are ignored.",
+            "properties": {
+              "model": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "minLength": 1,
+                "maxLength": 64
+              }
+            }
           }
         }
       },

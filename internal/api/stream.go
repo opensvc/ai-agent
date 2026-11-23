@@ -217,6 +217,7 @@ func streamRun(response http.ResponseWriter, request *http.Request, audit auditL
 			)
 		case agent.EventModelRetried:
 			audit.event(request.Context(), "llm_retried",
+				slog.String("model_id", event.ModelID),
 				slog.Int("iteration", event.Iteration),
 				slog.Int("attempt", event.Retry.Attempt),
 				slog.Int("status", event.Retry.Status),
@@ -227,6 +228,7 @@ func streamRun(response http.ResponseWriter, request *http.Request, audit auditL
 			usage.OutputTokens = saturatingAdd(usage.OutputTokens, event.Usage.OutputTokens)
 			usage.TotalTokens = saturatingAdd(usage.TotalTokens, event.Usage.TotalTokens)
 			audit.event(request.Context(), "llm_usage",
+				slog.String("model_id", event.ModelID),
 				slog.Int("iteration", event.Iteration),
 				slog.Int64("input_tokens", event.Usage.InputTokens),
 				slog.Int64("output_tokens", event.Usage.OutputTokens),

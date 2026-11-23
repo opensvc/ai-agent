@@ -148,8 +148,11 @@ const MaxTurnRuns = 32
 // actually sent, the MCP server with the hash of its tool catalog, whether
 // the catalog was searched and the tools shown to the model.
 type TurnRun struct {
-	AgentVersion       string `json:"agent_version"`
+	AgentVersion string `json:"agent_version"`
+	// Model is the name of the model at its provider, and ModelID the ID
+	// the agent offers it under; a run recorded before has no ID.
 	Model              string `json:"model"`
+	ModelID            string `json:"model_id,omitempty"`
 	SystemPromptSHA256 string `json:"system_prompt_sha256"`
 	MCPServer          string `json:"mcp_server"`
 	MCPVersion         string `json:"mcp_version"`
@@ -171,7 +174,7 @@ type TurnRun struct {
 
 // Equal tells whether two runs describe the same execution context.
 func (r TurnRun) Equal(other TurnRun) bool {
-	return r.AgentVersion == other.AgentVersion && r.Model == other.Model && r.SystemPromptSHA256 == other.SystemPromptSHA256 &&
+	return r.AgentVersion == other.AgentVersion && r.Model == other.Model && r.ModelID == other.ModelID && r.SystemPromptSHA256 == other.SystemPromptSHA256 &&
 		r.MCPServer == other.MCPServer && r.MCPVersion == other.MCPVersion && r.ToolsSHA256 == other.ToolsSHA256 &&
 		r.ToolSearch == other.ToolSearch && r.SearchScoreRatio == other.SearchScoreRatio && slices.Equal(r.ShownTools, other.ShownTools) && r.ShownToolsOmitted == other.ShownToolsOmitted &&
 		slices.Equal(r.Skills, other.Skills) &&
@@ -186,23 +189,23 @@ type RunSkill struct {
 	SHA256 string `json:"sha256"`
 }
 
-// AgentInfo describes the agent of a backend: its version and its model.
+// AgentInfo describes the agent of a backend: its version.
 type AgentInfo struct {
 	Version string
-	Model   string
 }
 
 // NewAgentInfo describes the agent of a backend.
-func NewAgentInfo(version string, model string) AgentInfo {
-	return AgentInfo{Version: version, Model: model}
+func NewAgentInfo(version string) AgentInfo {
+	return AgentInfo{Version: version}
 }
 
 // run describes an execution of a turn by this agent, as the agent reported
-// it: the MCP server and what the model was given.
-func (a AgentInfo) run(mcp agent.MCPServer, exposure agent.Exposure, history *HistoryStats) TurnRun {
+// it: its model, the MCP server and what the model was given.
+func (a AgentInfo) run(result agent.TurnResult, history *HistoryStats) TurnRun {
+	mcp, exposure := result.MCP, result.Exposure
 	return TurnRun{
 		History:      history,
-		AgentVersion: a.Version, Model: a.Model, SystemPromptSHA256: exposure.SystemPromptSHA256,
+		AgentVersion: a.Version, Model: result.Model.Name, ModelID: result.Model.ID, SystemPromptSHA256: exposure.SystemPromptSHA256,
 		MCPServer: mcp.Name, MCPVersion: mcp.Version, ToolsSHA256: mcp.ToolsSHA256,
 		ToolSearch: exposure.ToolSearch, SearchScoreRatio: exposure.SearchScoreRatio, ShownTools: exposure.ShownTools,
 		Skills: runSkills(exposure.Skills),

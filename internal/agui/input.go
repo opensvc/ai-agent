@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/opensvc/ai-agent/internal/agent"
+	"github.com/opensvc/ai-agent/internal/llm"
 )
 
 // RunAgentInput is the request of an AG-UI client for one run. The agent
@@ -57,6 +58,26 @@ type ToolAnswer struct {
 	CallID  string
 	Text    string
 	IsError bool
+}
+
+// Model gives the ID of the model the client chose, in the model member of
+// the forwarded properties: empty for the default, when the properties are
+// absent, not an object, or without a model. A model that is not a string
+// of 1 to llm.MaxModelIDBytes bytes is an error.
+func (input RunAgentInput) Model() (string, error) {
+	var props map[string]json.RawMessage
+	if json.Unmarshal(input.ForwardedProps, &props) != nil {
+		return "", nil
+	}
+	raw, ok := props["model"]
+	if !ok || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return "", nil
+	}
+	var id string
+	if err := json.Unmarshal(raw, &id); err != nil || id == "" || len(id) > llm.MaxModelIDBytes {
+		return "", fmt.Errorf("forwardedProps.model must be the ID of a model of the agent, a string of 1 to %d bytes", llm.MaxModelIDBytes)
+	}
+	return id, nil
 }
 
 // InterfaceContext gives the context of the input, AG-UI Context entries

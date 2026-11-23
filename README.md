@@ -60,6 +60,10 @@ OPENSVC_AI_LLM_API_TOKEN=replace-me
 ```
 
 `api_key` sends `x-api-key`; `bearer` remains available for Messages endpoints.
+`api_key` works with the `responses` and `chat_completions` protocols too, in
+the `api-key` header of an Azure OpenAI gateway by default;
+`OPENSVC_AI_LLM_AUTH_HEADER` names another, such as
+`Ocp-Apim-Subscription-Key` for Azure API Management.
 Messages requests ask the provider to cache, for five minutes, the tools and
 the system prompt, and the conversation up to its last message, which the
 next model call of the turn reads again, but on its last call, which takes
@@ -76,6 +80,52 @@ short. The next model calls of the turn read it again, as long as the system
 prompt and the tools it was given do not change: a `search_tools` that shows
 more tools leaves out the thinking before it. Keep the API key only in the protected environment
 file, never in Git or conversation history.
+
+### Several models
+
+The model of the `OPENSVC_AI_LLM_*` variables is the default, of ID
+`default`. `OPENSVC_AI_MODELS` adds others, in the order the interfaces list
+them after it, each with its own variables under `OPENSVC_AI_MODEL_<ID>_`,
+`<ID>` the ID in capitals; the user chooses the model of each message:
+
+```dotenv
+OPENSVC_AI_LLM_LABEL=GPT Luna
+
+OPENSVC_AI_MODELS=haiku,small
+OPENSVC_AI_MODEL_HAIKU_LABEL=Claude Haiku
+OPENSVC_AI_MODEL_HAIKU_PROTOCOL=messages
+OPENSVC_AI_MODEL_HAIKU_BASE_URL=https://api.anthropic.com/v1
+OPENSVC_AI_MODEL_HAIKU_MODEL=your-anthropic-model
+OPENSVC_AI_MODEL_HAIKU_AUTH_MODE=api_key
+OPENSVC_AI_MODEL_HAIKU_API_TOKEN=replace-me
+
+OPENSVC_AI_MODEL_SMALL_LABEL=Mistral Small
+OPENSVC_AI_MODEL_SMALL_PROTOCOL=chat_completions
+OPENSVC_AI_MODEL_SMALL_BASE_URL=https://api.mistral.ai/v1
+OPENSVC_AI_MODEL_SMALL_MODEL=mistral-small-latest
+OPENSVC_AI_MODEL_SMALL_AUTH_MODE=bearer
+OPENSVC_AI_MODEL_SMALL_API_TOKEN=replace-me
+OPENSVC_AI_MODEL_SMALL_STORE=omit
+```
+
+An ID is a lowercase letter then up to 15 lowercase letters or digits, other
+than `default`; 15 models at most besides the default. A model reads
+`PROTOCOL`, `BASE_URL`, `MODEL`, `AUTH_MODE`, `AUTH_HEADER`, `API_TOKEN`,
+`TIMEOUT`, `MAX_OUTPUT_TOKENS`, `REASONING_EFFORT` and `STORE` as the default
+does, none of them from the default, and `LABEL`, the name the interfaces
+show, its `MODEL` cut to 64 characters when unset. `API_TOKEN_FROM`, the ID of another model or
+`default`, reads the key of that model, which has its own `API_TOKEN`, in
+place of its own: two models of one provider share their key; the default
+takes its own key only, and `OPENSVC_AI_LLM_API_TOKEN_FROM` prevents startup. A variable
+under `OPENSVC_AI_MODEL_` that names a model not listed, or that no model
+reads, prevents startup. The agent logs each model at startup: its ID, label,
+model, host, protocol and authentication, never its key.
+
+A conversation runs each of its turns on the model of its message, a turn
+waiting on a confirmation resuming on the model it started on; on the default
+when the operator removed that model. The audit lines `llm_usage` and
+`llm_retried` name the `model_id` of each call. See
+[Models](docs/api.md#models).
 
 The agent serves the `om3` backend under `/v1/om3` and reaches its MCP only
 through the local Unix socket `OPENSVC_AI_OM3_MCP_SOCKET`. It also serves the
@@ -145,6 +195,9 @@ webapp origins, or `*` to allow all origins. Empty by default. See the
 | `OPENSVC_AI_AGENT_TIMEOUT` | `5m` | `1s` to `30m` |
 | `OPENSVC_AI_TOOL_SEARCH_SCORE_RATIO` | `0.30` | `0` to `1`; `0` shows every search result |
 | `OPENSVC_AI_TOOL_SEARCH_THRESHOLD` | `20` | `1` to `1024`, or `-1` to search only catalogs too large for one model request |
+| `OPENSVC_AI_LLM_LABEL` | the model name, `OPENSVC_AI_LLM_MODEL`, cut to 64 characters | 1 to 64 printable characters: the name of the default model in the interfaces |
+| `OPENSVC_AI_LLM_AUTH_HEADER` | `x-api-key` for `messages`, `api-key` otherwise | with `OPENSVC_AI_LLM_AUTH_MODE=api_key` only: the header of the key, a header name of at most 64 characters other than one the agent or the transport sets, such as `Authorization`, `Host` or `Expect` |
+| `OPENSVC_AI_MODELS` | unset: the default model only | comma-separated model IDs; see [Several models](#several-models) |
 | `OPENSVC_AI_LLM_TIMEOUT` | `2m` | any positive duration |
 | `OPENSVC_AI_LLM_MAX_OUTPUT_TOKENS` | `4096` | 1 to 131072 |
 | `OPENSVC_AI_LLM_REASONING_EFFORT` | unset: the model applies its own | `none`, `minimal`, `low`, `medium`, `high` or `xhigh`, as the model accepts; `responses` and `chat_completions` protocols only. With `responses`, an effort other than `none` asks for the reasoning of the model, encrypted (`include` `reasoning.encrypted_content`), which the next model calls of the turn read again. With `chat_completions`, a provider streaming its text as typed parts, as Mistral does when it reasons, is read by its text parts only: its reasoning is neither shown, stored nor given back to the model. A reasoning counts in `OPENSVC_AI_LLM_MAX_OUTPUT_TOKENS` with most providers: raise it, as an answer cut before its text fails the turn |

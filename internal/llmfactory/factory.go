@@ -17,26 +17,28 @@ func New(processConfig config.LLMConfig, httpClient *http.Client) (llm.Client, e
 	switch processConfig.Protocol {
 	case config.LLMProtocolMessages:
 		var tokenSource messages.TokenSource
-		if processConfig.AuthMode == config.LLMAuthModeBearer || processConfig.AuthMode == config.LLMAuthModeAPIKey {
+		if processConfig.AuthMode != config.LLMAuthModeNone {
 			tokenSource = environmentTokenSource(processConfig.APITokenEnv)
 		}
 		return messages.New(messages.Config{
 			BaseURL:         processConfig.BaseURL,
 			Model:           processConfig.Model,
 			AuthMode:        processConfig.AuthMode,
+			AuthHeader:      processConfig.AuthHeader,
 			TokenSource:     tokenSource,
 			Timeout:         processConfig.Timeout,
 			MaxOutputTokens: processConfig.MaxOutputTokens,
 		}, httpClient)
 	case config.LLMProtocolResponses:
 		var tokenSource responses.TokenSource
-		if processConfig.AuthMode == config.LLMAuthModeBearer {
+		if processConfig.AuthMode != config.LLMAuthModeNone {
 			tokenSource = environmentTokenSource(processConfig.APITokenEnv)
 		}
 		return responses.New(responses.Config{
 			BaseURL:         processConfig.BaseURL,
 			Model:           processConfig.Model,
 			AuthMode:        processConfig.AuthMode,
+			AuthHeader:      processConfig.AuthHeader,
 			TokenSource:     tokenSource,
 			Timeout:         processConfig.Timeout,
 			MaxOutputTokens: processConfig.MaxOutputTokens,
@@ -44,13 +46,14 @@ func New(processConfig config.LLMConfig, httpClient *http.Client) (llm.Client, e
 		}, httpClient)
 	case config.LLMProtocolChatCompletions:
 		var tokenSource chatcompletions.TokenSource
-		if processConfig.AuthMode == config.LLMAuthModeBearer {
+		if processConfig.AuthMode != config.LLMAuthModeNone {
 			tokenSource = environmentTokenSource(processConfig.APITokenEnv)
 		}
 		return chatcompletions.New(chatcompletions.Config{
 			BaseURL:         processConfig.BaseURL,
 			Model:           processConfig.Model,
 			AuthMode:        processConfig.AuthMode,
+			AuthHeader:      processConfig.AuthHeader,
 			TokenSource:     tokenSource,
 			Timeout:         processConfig.Timeout,
 			MaxOutputTokens: processConfig.MaxOutputTokens,
@@ -60,6 +63,20 @@ func New(processConfig config.LLMConfig, httpClient *http.Client) (llm.Client, e
 	default:
 		return nil, fmt.Errorf("unsupported LLM protocol %q", processConfig.Protocol)
 	}
+}
+
+// NewModels creates the client of each model, on one HTTP client, the
+// default first.
+func NewModels(models []config.ModelConfig, httpClient *http.Client) (*llm.Models, error) {
+	list := make([]llm.Model, 0, len(models))
+	for _, model := range models {
+		client, err := New(model.LLM, httpClient)
+		if err != nil {
+			return nil, fmt.Errorf("create the client of model %q: %w", model.ID, err)
+		}
+		list = append(list, llm.Model{ID: model.ID, Label: model.Label, Name: model.LLM.Model, Client: client})
+	}
+	return llm.NewModels(list)
 }
 
 func environmentTokenSource(name string) func() (string, error) {

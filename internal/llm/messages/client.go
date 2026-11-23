@@ -28,9 +28,12 @@ const (
 type TokenSource func() (string, error)
 
 type Config struct {
-	BaseURL         string
-	Model           string
-	AuthMode        string
+	BaseURL  string
+	Model    string
+	AuthMode string
+	// AuthHeader is the header of the key in the api_key mode; empty, the
+	// x-api-key header of Anthropic.
+	AuthHeader      string
 	TokenSource     TokenSource
 	Timeout         time.Duration
 	MaxOutputTokens int
@@ -41,6 +44,7 @@ type Client struct {
 	endpoint        string
 	model           string
 	authMode        string
+	authHeader      string
 	tokenSource     TokenSource
 	maxOutputTokens int
 	httpClient      *http.Client
@@ -77,7 +81,11 @@ func New(config Config, httpClient *http.Client) (*Client, error) {
 	clientCopy := *httpClient
 	clientCopy.Timeout = config.Timeout
 	clientCopy.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return &Client{endpoint: endpoint, model: config.Model, authMode: config.AuthMode,
+	authHeader := config.AuthHeader
+	if authHeader == "" {
+		authHeader = "x-api-key"
+	}
+	return &Client{endpoint: endpoint, model: config.Model, authMode: config.AuthMode, authHeader: authHeader,
 		tokenSource: config.TokenSource, maxOutputTokens: config.MaxOutputTokens, httpClient: &clientCopy}, nil
 }
 
@@ -131,7 +139,7 @@ func (c *Client) Stream(ctx context.Context, request llm.Request, emit llm.EmitF
 			}
 		}
 		if c.authMode == AuthModeAPIKey {
-			httpRequest.Header.Set("x-api-key", token)
+			httpRequest.Header.Set(c.authHeader, token)
 		} else {
 			httpRequest.Header.Set("Authorization", "Bearer "+token)
 		}

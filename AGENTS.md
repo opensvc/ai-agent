@@ -77,8 +77,11 @@ MCP socket is configured. The composition
 root builds, per backend, its MCP client, its authenticator, an agent with its
 system prompt and a conversation service bound to its name; the API registers
 its routes under `/v1/{backend}`. The route alone selects the backend: never choose it from a
-request header, body or token. LLM client, storage, limits and audit are
-shared; conversations stay bound to their backend.
+request header, body or token. The LLM models, storage, limits and audit are
+shared; conversations stay bound to their backend. The operator declares the
+models in the environment, and the composition root builds their clients; a
+run chooses one by its ID, never by a URL, header or credential of the
+request, and a turn keeps its model until it ends.
 
 Each turn opens and closes its own authenticated MCP session.
 Conversations must not retain MCP sessions or provider-specific state.

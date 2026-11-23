@@ -265,7 +265,7 @@ func TestRunAuditsTheSizeOfTheContextOnly(t *testing.T) {
 	}}
 	var output bytes.Buffer
 	handler, err := NewHandler([]Backend{{Name: "om3", Conversations: service, Authenticator: allowTestTokenVerifier()}},
-		HandlerConfig{MaxConcurrentAsks: 4, AuditLogger: slog.New(slog.NewJSONHandler(&output, nil))})
+		HandlerConfig{Models: testModels(), MaxConcurrentAsks: 4, AuditLogger: slog.New(slog.NewJSONHandler(&output, nil))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -491,7 +491,7 @@ func TestRunResumesWithTheEditedArguments(t *testing.T) {
 	}
 	var output bytes.Buffer
 	handler, err := NewHandler([]Backend{{Name: "om3", Conversations: service, Authenticator: allowTestTokenVerifier()}},
-		HandlerConfig{MaxConcurrentAsks: 4, AuditLogger: slog.New(slog.NewJSONHandler(&output, nil))})
+		HandlerConfig{Models: testModels(), MaxConcurrentAsks: 4, AuditLogger: slog.New(slog.NewJSONHandler(&output, nil))})
 	if err != nil {
 		t.Fatal(err)
 	}

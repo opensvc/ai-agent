@@ -362,7 +362,7 @@ func TestAskPropagatesMCPAndConsumerErrorsAndClosesSession(t *testing.T) {
 func TestAskTimesOutAndClosesMCPSession(t *testing.T) {
 	session := &fakeSession{}
 	model := &deadlineLLM{}
-	agent, err := New(model, func(context.Context) (MCPSession, error) {
+	agent, err := New(llm.SingleModel(model, "test-model"), func(context.Context) (MCPSession, error) {
 		return session, nil
 	}, Config{SystemPrompt: testSystemPrompt, MaxIterations: 2, Timeout: 20 * time.Millisecond})
 	if err != nil {
@@ -480,7 +480,7 @@ func (s *fakeSession) Close() error {
 
 func newTestAgent(t *testing.T, model llm.Client, session *fakeSession, maxIterations int) *Agent {
 	t.Helper()
-	agent, err := New(model, func(ctx context.Context) (MCPSession, error) {
+	agent, err := New(llm.SingleModel(model, "test-model"), func(ctx context.Context) (MCPSession, error) {
 		if token, ok := auth.BearerTokenFromContext(ctx); ok && token == "jwt-marker" {
 			session.connectedWithJWT = true
 		}
@@ -528,7 +528,7 @@ func emitEvents(emit llm.EmitFunc, events ...llm.Event) error {
 
 func TestNewRequiresASystemPrompt(t *testing.T) {
 	connect := func(context.Context) (MCPSession, error) { return nil, nil }
-	if _, err := New(&scriptedLLM{}, connect, Config{SystemPrompt: " ", MaxIterations: 2, Timeout: time.Minute}); err == nil {
+	if _, err := New(llm.SingleModel(&scriptedLLM{}, "test-model"), connect, Config{SystemPrompt: " ", MaxIterations: 2, Timeout: time.Minute}); err == nil {
 		t.Fatal("New() accepted an empty system prompt")
 	}
 }

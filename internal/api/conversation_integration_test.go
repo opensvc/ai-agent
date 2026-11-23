@@ -20,6 +20,7 @@ import (
 	"github.com/opensvc/ai-agent/internal/config"
 	"github.com/opensvc/ai-agent/internal/conversation"
 	conversationsqlite "github.com/opensvc/ai-agent/internal/conversation/sqlite"
+	"github.com/opensvc/ai-agent/internal/llm"
 	"github.com/opensvc/ai-agent/internal/llmfactory"
 )
 
@@ -46,7 +47,7 @@ func TestLiveConversationTurnStreamsClusterHealth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create live MCP client: %v", err)
 	}
-	orchestrator, err := agent.New(model, func(ctx context.Context) (agent.MCPSession, error) {
+	orchestrator, err := agent.New(llm.SingleModel(model, llmConfig.Model), func(ctx context.Context) (agent.MCPSession, error) {
 		return mcpClient.Connect(ctx)
 	}, agent.Config{SystemPrompt: om3.SystemPrompt, MaxIterations: agentConfig.MaxIterations, Timeout: agentConfig.Timeout})
 	if err != nil {
@@ -62,6 +63,7 @@ func TestLiveConversationTurnStreamsClusterHealth(t *testing.T) {
 		t.Fatalf("create conversation service: %v", err)
 	}
 	handler, err := api.NewHandler([]api.Backend{{Name: "om3", Conversations: service, Authenticator: om3.NewAuthenticator(mcpClient)}}, api.HandlerConfig{
+		Models:            llm.SingleModel(model, llmConfig.Model),
 		MaxConcurrentAsks: 4,
 		AuditLogger:       slog.New(slog.NewTextHandler(io.Discard, nil)),
 	})

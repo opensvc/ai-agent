@@ -38,7 +38,7 @@ func searchAgent(t *testing.T, model llm.Client, session *fakeSession, config Co
 	if config.SearchThreshold == 0 {
 		config.SearchThreshold = 3
 	}
-	agent, err := New(model, func(context.Context) (MCPSession, error) { return session, nil }, config)
+	agent, err := New(llm.SingleModel(model, "test-model"), func(context.Context) (MCPSession, error) { return session, nil }, config)
 	if err != nil {
 		t.Fatal(err)
 	}

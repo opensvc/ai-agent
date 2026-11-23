@@ -12,6 +12,7 @@ import (
 	"github.com/opensvc/ai-agent/internal/auth"
 	"github.com/opensvc/ai-agent/internal/backend/om3"
 	"github.com/opensvc/ai-agent/internal/config"
+	"github.com/opensvc/ai-agent/internal/llm"
 	"github.com/opensvc/ai-agent/internal/llmfactory"
 )
 
@@ -38,7 +39,7 @@ func TestLiveAgentUsesClusterHealthTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create live MCP client: %v", err)
 	}
-	orchestrator, err := agent.New(model, func(ctx context.Context) (agent.MCPSession, error) {
+	orchestrator, err := agent.New(llm.SingleModel(model, "test-model"), func(ctx context.Context) (agent.MCPSession, error) {
 		return mcpClient.Connect(ctx)
 	}, agent.Config{SystemPrompt: om3.SystemPrompt, MaxIterations: agentConfig.MaxIterations, Timeout: agentConfig.Timeout})
 	if err != nil {
