@@ -9,6 +9,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/opensvc/ai-agent/internal/auth"
+	"github.com/opensvc/ai-agent/internal/llm"
 )
 
 func TestToolsListWhatTheModelMayBeOffered(t *testing.T) {
@@ -51,7 +52,7 @@ func TestToolsListWhatTheModelMayBeOffered(t *testing.T) {
 }
 
 func TestToolsFailWithTheMCP(t *testing.T) {
-	agent, err := New(&scriptedLLM{t: t}, func(context.Context) (MCPSession, error) {
+	agent, err := New(llm.SingleModel(&scriptedLLM{t: t}, "test-model"), func(context.Context) (MCPSession, error) {
 		return nil, errors.New("connection refused")
 	}, Config{SystemPrompt: testSystemPrompt, MaxIterations: 4, Timeout: 60e9})
 	if err != nil {

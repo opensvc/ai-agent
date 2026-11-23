@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -43,12 +44,15 @@ func main() {
 	if err != nil {
 		log.Fatalf("load configuration: %v", err)
 	}
-	llmConfig, err := config.LoadLLM()
+	modelConfigs, err := config.LoadModels()
 	if err != nil {
 		log.Fatalf("load LLM configuration: %v", err)
 	}
-	if llmConfig.OmitStore {
-		log.Printf("LLM requests leave store out (OPENSVC_AI_LLM_STORE=omit): the retention policy of the provider applies")
+	for _, model := range modelConfigs {
+		log.Printf("model %s: %q, %s on %s, protocol %s, authentication %s", model.ID, model.Label, model.LLM.Model, urlHost(model.LLM.BaseURL), model.LLM.Protocol, model.LLM.AuthMode)
+		if model.LLM.OmitStore {
+			log.Printf("model %s: the LLM requests leave store out (STORE=omit): the retention policy of the provider applies", model.ID)
+		}
 	}
 	agentConfig, err := config.LoadAgent()
 	if err != nil {
@@ -67,9 +71,9 @@ func main() {
 		log.Fatalf("load documentation configuration: %v", err)
 	}
 
-	model, err := llmfactory.New(llmConfig, nil)
+	models, err := llmfactory.NewModels(modelConfigs, nil)
 	if err != nil {
-		log.Fatalf("create LLM client: %v", err)
+		log.Fatalf("create LLM clients: %v", err)
 	}
 	// One shelf of books serves both backends. With no book, a source stays
 	// nil, not a source holding nil: the backends offer no search.
@@ -129,9 +133,9 @@ func main() {
 	for _, spec := range specs {
 		serviceConfig := conversation.ServiceConfig{
 			Backend: spec.name, Lifetime: conversationConfig.Lifetime, FeedbackRetention: conversationConfig.FeedbackRetention,
-			Agent: conversation.NewAgentInfo(buildinfo.Version(), llmConfig.Model),
+			Agent: conversation.NewAgentInfo(buildinfo.Version()),
 		}
-		backend, service, err := newBackend(spec, model, conversationStore, agent.Config{
+		backend, service, err := newBackend(spec, models, conversationStore, agent.Config{
 			Backend: spec.name, SystemPrompt: spec.systemPrompt, MaxIterations: agentConfig.MaxIterations, Timeout: agentConfig.Timeout,
 			SearchThreshold: agentConfig.SearchThreshold, SearchScoreRatio: agentConfig.SearchScoreRatio, Docs: spec.docs, Code: spec.code,
 		}, serviceConfig)
@@ -173,6 +177,7 @@ func main() {
 		AuditLogger:              auditLogger,
 		CORSAllowedOrigins:       processConfig.CORSAllowedOrigins,
 		FeedbackDisabled:         !conversationConfig.FeedbackEnabled,
+		Models:                   models,
 	})
 	if err != nil {
 		_ = conversationStore.Close()
@@ -254,13 +259,13 @@ func loadDocs(root string) *docs.Shelf {
 }
 
 // newBackend builds the MCP client, the agent and the conversation service of
-// one backend on the shared model and store.
-func newBackend(spec backendSpec, model llm.Client, store conversation.Store, agentConfig agent.Config, serviceConfig conversation.ServiceConfig) (api.Backend, *conversation.Service, error) {
+// one backend on the shared models and store.
+func newBackend(spec backendSpec, models *llm.Models, store conversation.Store, agentConfig agent.Config, serviceConfig conversation.ServiceConfig) (api.Backend, *conversation.Service, error) {
 	client, err := spec.newMCPClient(spec.socketPath)
 	if err != nil {
 		return api.Backend{}, nil, fmt.Errorf("create MCP client: %w", err)
 	}
-	orchestrator, err := agent.New(model, func(ctx context.Context) (agent.MCPSession, error) {
+	orchestrator, err := agent.New(models, func(ctx context.Context) (agent.MCPSession, error) {
 		return client.Connect(ctx)
 	}, agentConfig)
 	if err != nil {
@@ -308,4 +313,14 @@ func shutdownHTTPServer(server *http.Server, timeout time.Duration) error {
 		return shutdownErr
 	}
 	return nil
+}
+
+// urlHost is the host of a base URL for the log, without its path, which
+// may name a deployment of a gateway.
+func urlHost(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" {
+		return "an invalid URL"
+	}
+	return parsed.Host
 }

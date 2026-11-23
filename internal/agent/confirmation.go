@@ -128,6 +128,8 @@ type SuspendedTurn struct {
 	// InterfaceContext is the context the interface of the user gave with
 	// the prompt of the turn, which the model reads again when it resumes.
 	InterfaceContext []InterfaceEntry `json:"interface_context,omitempty"`
+	// ModelID is the ID of the model the turn runs on, which it resumes on.
+	ModelID string `json:"model_id,omitempty"`
 	// ToolSHA256 hashes the definition of the pending tool, as the server
 	// listed it when the confirmation was asked: name, title, description,
 	// schemas, annotations and metadata. A decision applies to that tool
@@ -158,6 +160,9 @@ func (s SuspendedTurn) validate(maxIterations int) error {
 	}
 	if err := ValidateInterfaceContext(s.InterfaceContext); err != nil {
 		return fmt.Errorf("suspended turn: %w", err)
+	}
+	if len(s.ModelID) > llm.MaxModelIDBytes {
+		return fmt.Errorf("suspended turn model ID is too long")
 	}
 	if s.CodeSearches < 0 || s.CodeSearches > maxCodeSearchesPerAsk {
 		return fmt.Errorf("suspended turn code search count %d is out of range", s.CodeSearches)

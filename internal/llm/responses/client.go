@@ -18,6 +18,7 @@ import (
 const (
 	AuthModeNone   = "none"
 	AuthModeBearer = "bearer"
+	AuthModeAPIKey = "api_key"
 
 	maxRequestBytes   = 4 << 20
 	maxErrorBodyBytes = 64 << 10
@@ -26,9 +27,12 @@ const (
 type TokenSource func() (string, error)
 
 type Config struct {
-	BaseURL         string
-	Model           string
-	AuthMode        string
+	BaseURL  string
+	Model    string
+	AuthMode string
+	// AuthHeader is the header of the key in the api_key mode, such as
+	// api-key for an Azure OpenAI gateway.
+	AuthHeader      string
 	TokenSource     TokenSource
 	Timeout         time.Duration
 	MaxOutputTokens int
@@ -41,6 +45,7 @@ type Client struct {
 	endpoint        string
 	model           string
 	authMode        string
+	authHeader      string
 	tokenSource     TokenSource
 	maxOutputTokens int
 	reasoningEffort string
@@ -69,6 +74,13 @@ func New(config Config, httpClient *http.Client) (*Client, error) {
 		if config.TokenSource == nil {
 			return nil, fmt.Errorf("Responses bearer token source is missing")
 		}
+	case AuthModeAPIKey:
+		if config.TokenSource == nil {
+			return nil, fmt.Errorf("Responses API key source is missing")
+		}
+		if config.AuthHeader == "" {
+			return nil, fmt.Errorf("Responses API key header is missing")
+		}
 	default:
 		return nil, fmt.Errorf("unsupported Responses authentication mode %q", config.AuthMode)
 	}
@@ -86,6 +98,7 @@ func New(config Config, httpClient *http.Client) (*Client, error) {
 		endpoint:        endpoint,
 		model:           config.Model,
 		authMode:        config.AuthMode,
+		authHeader:      config.AuthHeader,
 		tokenSource:     config.TokenSource,
 		maxOutputTokens: config.MaxOutputTokens,
 		reasoningEffort: config.ReasoningEffort,
@@ -148,7 +161,7 @@ func (c *Client) Stream(ctx context.Context, request llm.Request, emit llm.EmitF
 	httpRequest.Header.Set("Accept", "text/event-stream")
 
 	var token string
-	if c.authMode == AuthModeBearer {
+	if c.authMode != AuthModeNone {
 		token, err = c.tokenSource()
 		if err != nil {
 			return fmt.Errorf("load Responses API token: %w", err)
@@ -156,7 +169,11 @@ func (c *Client) Stream(ctx context.Context, request llm.Request, emit llm.EmitF
 		if token == "" {
 			return fmt.Errorf("load Responses API token: token is empty")
 		}
-		httpRequest.Header.Set("Authorization", "Bearer "+token)
+		if c.authMode == AuthModeAPIKey {
+			httpRequest.Header.Set(c.authHeader, token)
+		} else {
+			httpRequest.Header.Set("Authorization", "Bearer "+token)
+		}
 	}
 
 	response, err := c.httpClient.Do(httpRequest)

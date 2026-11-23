@@ -3,7 +3,8 @@
 The [integration guide](integration.md) tells how an interface speaks to the
 agent with AG-UI. This guide adds what a browser client of the om3 backend,
 such as the OpenSVC webapp, needs: its headers, the verification of its
-token, the history, the feedback, the confirmation of actions and CORS.
+token, the history, the feedback, the choice of the model, the confirmation
+of actions and CORS.
 
 Each protected HTTPS request under `/v1/om3` supplies the user's access token
 and cluster ID, and may name a daemon node:
@@ -147,6 +148,29 @@ messages still carry the feedback given before: show it read-only, or not at
 all, since changing or withdrawing it is refused. Tell the user that their
 feedback and the exchange it rates are kept to improve the assistant, without
 their identity. See [the API](api.md#feedback) for the limits.
+
+## Model
+
+When `GET /v1/om3/capabilities` returns `custom.models` true, read
+`GET /v1/om3/models`, and offer a choice of the model beside the prompt when
+it lists two models or more. With one model, an agent without
+`custom.models`, or a list that cannot be read, offer no choice and send no
+model: the runs are on the default model.
+
+- Show each model by its `label`; a model whose `ready` is false, shown, is
+  not offered.
+- Choose first the `model_id` of the last assistant message of the
+  conversation opened, then the last choice of the user, kept by the client
+  for the backend, then the model whose `default` is true; an ID the list no
+  longer holds is passed over.
+- Send the choice in `forwardedProps.model` with each new prompt. The choice
+  waits while a run streams: a confirmation or the answers to the calls of
+  the tools of the client resume the turn on its model, whatever they send.
+- On 400 `model_unknown`, the operator removed the model: read the list
+  again, choose the default, tell the user, and keep their prompt for them to
+  send it again.
+
+See [the API](api.md#models).
 
 ## Interface context
 

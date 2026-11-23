@@ -69,7 +69,7 @@ var errUnattendedSuspended = errors.New("the unattended turn ended waiting on a 
 // no history, nothing is stored, and the model is offered the read-only tools
 // of the MCP only. The run never waits: it completes, or fails. The stream
 // speaks AG-UI, and RUN_FINISHED carries the summary of the calls.
-func serveUnattendedRun(backend string, runner UnattendedRunner, limiter *askLimiter, audit auditLogger) http.HandlerFunc {
+func serveUnattendedRun(backend string, runner UnattendedRunner, models *llm.Models, limiter *askLimiter, audit auditLogger) http.HandlerFunc {
 	return func(response http.ResponseWriter, request *http.Request) {
 		attributes := []slog.Attr{slog.Bool("unattended", true)}
 		reject := func(status int, code, message string) {
@@ -94,6 +94,12 @@ func serveUnattendedRun(backend string, runner UnattendedRunner, limiter *askLim
 			return
 		}
 		attributes = append(attributes, interfaceContextAttributes(interfaceContext)...)
+		model, err := resolveModel(request.Context(), models, input)
+		if err != nil {
+			reject(http.StatusBadRequest, "model_unknown", err.Error())
+			return
+		}
+		attributes = append(attributes, slog.String("model_id", model.ID))
 		prompt, skipped, err := input.Prompt()
 		switch {
 		case err != nil:
@@ -170,7 +176,7 @@ func serveUnattendedRun(backend string, runner UnattendedRunner, limiter *askLim
 			}
 		}
 		streamRun(response, request, audit, "unattended_run", attributes, codec, func(emit agent.EmitFunc) error {
-			result, err := runner.RunTurn(agent.WithInterfaceContext(agent.WithUnattended(request.Context()), interfaceContext), nil, prompt, func(event agent.Event) error {
+			result, err := runner.RunTurn(agent.WithModel(agent.WithInterfaceContext(agent.WithUnattended(request.Context()), interfaceContext), model.ID), nil, prompt, func(event agent.Event) error {
 				record(event)
 				return emit(event)
 			})

@@ -655,7 +655,7 @@ func (t *PreparedTurn) Run(ctx context.Context, emit agent.EmitFunc) error {
 		state := *t.resume
 		state.Preview, state.PreviewArguments, state.EditedArguments = nil, nil, nil
 		state.PreviewError = "the preview could not be computed again"
-		return t.suspend(state, t.service.config.Agent.run(result.MCP, result.Exposure, t.historyStats), emit)
+		return t.suspend(state, t.service.config.Agent.run(result, t.historyStats), emit)
 	}
 	if runErr != nil {
 		status, code := turnFailure(runErr, ctx.Err())
@@ -666,7 +666,7 @@ func (t *PreparedTurn) Run(ctx context.Context, emit agent.EmitFunc) error {
 			err := errors.New("conversation turn both completed and suspended")
 			return errors.Join(err, t.service.failTurn(t.owner, t.conversationID, t.turnID, TurnFailed, "agent_incomplete"))
 		}
-		return t.suspend(*result.Suspended, t.service.config.Agent.run(result.MCP, result.Exposure, t.historyStats), emit)
+		return t.suspend(*result.Suspended, t.service.config.Agent.run(result, t.historyStats), emit)
 	}
 	if completedEvent == nil {
 		err := errors.New("conversation turn completed without a completion event")
@@ -682,7 +682,7 @@ func (t *PreparedTurn) Run(ctx context.Context, emit agent.EmitFunc) error {
 	completeErr := t.service.store.CompleteTurn(
 		finalizeCtx, t.owner, t.conversationID, t.turnID, completedAt,
 		completedAt.Add(t.service.config.Lifetime), result.Messages,
-		t.service.config.Agent.run(result.MCP, result.Exposure, t.historyStats), t.timing,
+		t.service.config.Agent.run(result, t.historyStats), t.timing,
 	)
 	cancel()
 	if completeErr != nil {

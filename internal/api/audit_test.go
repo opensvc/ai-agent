@@ -188,7 +188,7 @@ func TestAuditDoesNotRecordConversationTitle(t *testing.T) {
 		}
 		return conversation.Conversation{ID: id, Title: titleMarker}, nil
 	}}
-	handler, err := NewHandler([]Backend{{Name: "om3", Conversations: service, Authenticator: allowTestTokenVerifier()}}, HandlerConfig{MaxConcurrentAsks: 4, AuditLogger: logger})
+	handler, err := NewHandler([]Backend{{Name: "om3", Conversations: service, Authenticator: allowTestTokenVerifier()}}, HandlerConfig{Models: testModels(), MaxConcurrentAsks: 4, AuditLogger: logger})
 	if err != nil {
 		t.Fatalf("create audited API handler: %v", err)
 	}
@@ -246,7 +246,7 @@ func TestBoundedAuditIdentityNormalizesAndTruncates(t *testing.T) {
 func newAuditTestHandler(t *testing.T, output *bytes.Buffer, asker turnFunc, verifier Authenticator) http.Handler {
 	t.Helper()
 	logger := slog.New(slog.NewJSONHandler(output, nil))
-	handler, err := NewHandler([]Backend{{Name: "om3", Conversations: turnService{run: asker}, Authenticator: verifier}}, HandlerConfig{MaxConcurrentAsks: 4, AuditLogger: logger})
+	handler, err := NewHandler([]Backend{{Name: "om3", Conversations: turnService{run: asker}, Authenticator: verifier}}, HandlerConfig{Models: testModels(), MaxConcurrentAsks: 4, AuditLogger: logger})
 	if err != nil {
 		t.Fatalf("create audited API handler: %v", err)
 	}

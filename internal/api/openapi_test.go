@@ -66,7 +66,7 @@ func TestOpenAPIDescribesTheRegisteredRoutes(t *testing.T) {
 		}
 	}
 	registered := []string{"GET /health", "GET /openapi.json"}
-	for _, route := range backendRoutes("", nil, nil, nil, false, nil, auditLogger{}) {
+	for _, route := range backendRoutes("", nil, nil, nil, false, nil, nil, auditLogger{}) {
 		registered = append(registered, route.method+" /v1/{backend}"+route.path)
 	}
 	sort.Strings(documented)
@@ -113,7 +113,7 @@ func TestOpenAPIDocumentsTheConversationErrorCodes(t *testing.T) {
 		}
 	}
 	for _, code := range []string{"unauthorized", "authentication_unavailable", "too_many_requests", "unsupported_media_type", "request_too_large",
-		"invalid_prompt", "prompt_too_large", "invalid_decision", "streaming_unavailable", "feedback_disabled"} {
+		"invalid_prompt", "prompt_too_large", "invalid_decision", "streaming_unavailable", "feedback_disabled", "model_unknown"} {
 		if !bytes.Contains(openAPIDocument, []byte("`"+code+"`")) {
 			t.Errorf("error code %s is not documented", code)
 		}

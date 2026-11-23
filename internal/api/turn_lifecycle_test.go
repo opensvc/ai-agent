@@ -63,7 +63,7 @@ func TestAFailedOpeningLeavesNoTurnRunning(t *testing.T) {
 	verifier := tokenVerifierFunc(func(_ context.Context, token string) (auth.Identity, error) {
 		return auth.Identity{ClusterID: "cluster-id", Issuer: "cluster", Subject: token}, nil
 	})
-	handler, err := NewHandler([]Backend{{Name: "om3", Conversations: service, Authenticator: verifier}}, HandlerConfig{MaxConcurrentAsks: 2, AuditLogger: discardAuditLogger()})
+	handler, err := NewHandler([]Backend{{Name: "om3", Conversations: service, Authenticator: verifier}}, HandlerConfig{Models: testModels(), MaxConcurrentAsks: 2, AuditLogger: discardAuditLogger()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestAFailedCancellationIsAudited(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			var audit bytes.Buffer
 			handler, err := NewHandler([]Backend{{Name: "om3", Conversations: cancelFailing{err: test.err}, Authenticator: allowTestTokenVerifier()}},
-				HandlerConfig{MaxConcurrentAsks: 2, AuditLogger: slog.New(slog.NewTextHandler(&audit, nil))})
+				HandlerConfig{Models: testModels(), MaxConcurrentAsks: 2, AuditLogger: slog.New(slog.NewTextHandler(&audit, nil))})
 			if err != nil {
 				t.Fatal(err)
 			}

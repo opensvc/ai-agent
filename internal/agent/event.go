@@ -71,6 +71,8 @@ type Event struct {
 	// to the first event of its stream.
 	ModelDuration   time.Duration
 	ModelFirstEvent time.Duration
+	// ModelID is the ID of the model of a usage or model_retried event.
+	ModelID string
 	// At is when the agent emitted the event, on its clock.
 	At time.Time
 }

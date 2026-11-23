@@ -399,7 +399,7 @@ func (e *testTurnExecution) Cancel(string) error {
 
 func newConversationTestHandler(t *testing.T, service ConversationService) http.Handler {
 	t.Helper()
-	handler, err := NewHandler([]Backend{{Name: "om3", Conversations: service, Authenticator: allowTestTokenVerifier()}}, HandlerConfig{MaxConcurrentAsks: 4, AuditLogger: discardAuditLogger()})
+	handler, err := NewHandler([]Backend{{Name: "om3", Conversations: service, Authenticator: allowTestTokenVerifier()}}, HandlerConfig{Models: testModels(), MaxConcurrentAsks: 4, AuditLogger: discardAuditLogger()})
 	if err != nil {
 		t.Fatalf("create conversation test handler: %v", err)
 	}

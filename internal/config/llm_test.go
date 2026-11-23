@@ -146,10 +146,57 @@ func TestLoadLLMMessagesAuthentication(t *testing.T) {
 			}
 		})
 	}
-	for _, protocol := range []string{LLMProtocolResponses, LLMProtocolChatCompletions} {
-		values := map[string]string{"OPENSVC_AI_LLM_PROTOCOL": protocol, "OPENSVC_AI_LLM_BASE_URL": "https://api.example.test/v1", "OPENSVC_AI_LLM_MODEL": "test-model", "OPENSVC_AI_LLM_AUTH_MODE": LLMAuthModeAPIKey, LLMAPITokenEnv: "present"}
-		if _, err := loadLLM(func(key string) string { return values[key] }); err == nil || !strings.Contains(err.Error(), "requires the messages protocol") {
-			t.Fatalf("incompatible auth error=%v", err)
+}
+
+// TestLoadLLMAPIKeyHeader checks the header of a key: x-api-key on the
+// Messages protocol, api-key on the others, as an Azure OpenAI gateway reads
+// it, or the one the operator names; never outside the api_key mode, nor
+// one the agent or the transport sets.
+func TestLoadLLMAPIKeyHeader(t *testing.T) {
+	load := func(protocol, mode, header string) (LLMConfig, error) {
+		values := map[string]string{
+			"OPENSVC_AI_LLM_PROTOCOL": protocol, "OPENSVC_AI_LLM_BASE_URL": "https://gateway.example.test/v1",
+			"OPENSVC_AI_LLM_MODEL": "test-model", "OPENSVC_AI_LLM_AUTH_MODE": mode, "OPENSVC_AI_LLM_AUTH_HEADER": header,
+			LLMAPITokenEnv: "present",
+		}
+		return loadLLM(func(key string) string { return values[key] })
+	}
+	for protocol, want := range map[string]string{LLMProtocolMessages: "x-api-key", LLMProtocolResponses: "api-key", LLMProtocolChatCompletions: "api-key"} {
+		if config, err := load(protocol, LLMAuthModeAPIKey, ""); err != nil || config.AuthHeader != want {
+			t.Fatalf("%s: header=%q error=%v, want %q", protocol, config.AuthHeader, err, want)
+		}
+		if config, err := load(protocol, LLMAuthModeAPIKey, "Ocp-Apim-Subscription-Key"); err != nil || config.AuthHeader != "Ocp-Apim-Subscription-Key" {
+			t.Fatalf("%s: named header=%q error=%v", protocol, config.AuthHeader, err)
+		}
+		if config, err := load(protocol, LLMAuthModeBearer, ""); err != nil || config.AuthHeader != "" {
+			t.Fatalf("%s: bearer header=%q error=%v", protocol, config.AuthHeader, err)
+		}
+	}
+	for header, want := range map[string]string{
+		"api-key":                    "requires the api_key authentication",
+		"Authorization":              "sets",
+		"x-request-id":               "sets",
+		"Content-Length":             "sets",
+		"Expect":                     "sets",
+		"api key":                    "valid header name",
+		"api-key:":                   "valid header name",
+		"é-key":                      "valid header name",
+		strings.Repeat("k", 65):      "at most 64",
+		"X-Gateway-Subscription-Key": "",
+	} {
+		mode := LLMAuthModeAPIKey
+		if header == "api-key" {
+			mode = LLMAuthModeBearer
+		}
+		_, err := load(LLMProtocolResponses, mode, header)
+		if want == "" {
+			if err != nil {
+				t.Fatalf("header %q refused: %v", header, err)
+			}
+			continue
+		}
+		if err == nil || !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "OPENSVC_AI_LLM_AUTH_HEADER") {
+			t.Fatalf("header %q: error=%v, want containing %q", header, err, want)
 		}
 	}
 }

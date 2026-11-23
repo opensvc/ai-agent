@@ -404,7 +404,7 @@ func TestRunReleasesConcurrencySlotAfterCancellation(t *testing.T) {
 }
 
 func TestNewHandlerRejectsInvalidBackends(t *testing.T) {
-	config := HandlerConfig{MaxConcurrentAsks: 4, AuditLogger: discardAuditLogger()}
+	config := HandlerConfig{Models: testModels(), MaxConcurrentAsks: 4, AuditLogger: discardAuditLogger()}
 	valid := Backend{Name: "om3", Conversations: turnService{run: turnFunc(func(context.Context, string, agent.EmitFunc) error { return nil })}, Authenticator: allowTestTokenVerifier()}
 	if _, err := NewHandler(nil, config); err == nil {
 		t.Fatal("NewHandler() accepted no backend")
@@ -425,10 +425,10 @@ func TestNewHandlerRejectsInvalidBackends(t *testing.T) {
 	if _, err := NewHandler([]Backend{{Name: "om3", Conversations: turnService{run: turnFunc(func(context.Context, string, agent.EmitFunc) error { return nil })}, Authenticator: nil}}, config); err == nil {
 		t.Fatal("NewHandler() accepted nil verifier")
 	}
-	if _, err := NewHandler([]Backend{{Name: "om3", Conversations: turnService{run: turnFunc(func(context.Context, string, agent.EmitFunc) error { return nil })}, Authenticator: allowTestTokenVerifier()}}, HandlerConfig{AuditLogger: discardAuditLogger()}); err == nil {
+	if _, err := NewHandler([]Backend{{Name: "om3", Conversations: turnService{run: turnFunc(func(context.Context, string, agent.EmitFunc) error { return nil })}, Authenticator: allowTestTokenVerifier()}}, HandlerConfig{Models: testModels(), AuditLogger: discardAuditLogger()}); err == nil {
 		t.Fatal("NewHandler() accepted zero concurrent asks")
 	}
-	if _, err := NewHandler([]Backend{{Name: "om3", Conversations: turnService{run: turnFunc(func(context.Context, string, agent.EmitFunc) error { return nil })}, Authenticator: allowTestTokenVerifier()}}, HandlerConfig{MaxConcurrentAsks: 4}); err == nil {
+	if _, err := NewHandler([]Backend{{Name: "om3", Conversations: turnService{run: turnFunc(func(context.Context, string, agent.EmitFunc) error { return nil })}, Authenticator: allowTestTokenVerifier()}}, HandlerConfig{Models: testModels(), MaxConcurrentAsks: 4}); err == nil {
 		t.Fatal("NewHandler() accepted nil audit logger")
 	}
 }
@@ -453,7 +453,7 @@ func newTestHandler(t *testing.T, asker turnFunc) http.Handler {
 
 func newTestHandlerWithLimit(t *testing.T, asker turnFunc, maxConcurrentAsks int) http.Handler {
 	t.Helper()
-	handler, err := NewHandler([]Backend{{Name: "om3", Conversations: turnService{run: asker}, Authenticator: allowTestTokenVerifier()}}, HandlerConfig{MaxConcurrentAsks: maxConcurrentAsks, AuditLogger: discardAuditLogger()})
+	handler, err := NewHandler([]Backend{{Name: "om3", Conversations: turnService{run: asker}, Authenticator: allowTestTokenVerifier()}}, HandlerConfig{Models: testModels(), MaxConcurrentAsks: maxConcurrentAsks, AuditLogger: discardAuditLogger()})
 	if err != nil {
 		t.Fatalf("create API handler: %v", err)
 	}
@@ -462,7 +462,7 @@ func newTestHandlerWithLimit(t *testing.T, asker turnFunc, maxConcurrentAsks int
 
 func newTestHandlerWithVerifier(t *testing.T, asker turnFunc, verifier Authenticator) http.Handler {
 	t.Helper()
-	handler, err := NewHandler([]Backend{{Name: "om3", Conversations: turnService{run: asker}, Authenticator: verifier}}, HandlerConfig{MaxConcurrentAsks: 4, AuditLogger: discardAuditLogger()})
+	handler, err := NewHandler([]Backend{{Name: "om3", Conversations: turnService{run: asker}, Authenticator: verifier}}, HandlerConfig{Models: testModels(), MaxConcurrentAsks: 4, AuditLogger: discardAuditLogger()})
 	if err != nil {
 		t.Fatalf("create API handler: %v", err)
 	}
@@ -509,7 +509,7 @@ func TestRunGivesEachUserAShareOfTheSlots(t *testing.T) {
 		return auth.Identity{ClusterID: cmp.Or(cluster, "cluster-id"), Subject: user, Issuer: "node1"}, nil
 	})
 	handler, err := NewHandler([]Backend{{Name: "om3", Conversations: turnService{run: asker}, Authenticator: verifier}},
-		HandlerConfig{MaxConcurrentAsks: 4, MaxConcurrentAsksPerUser: 1, AuditLogger: discardAuditLogger()})
+		HandlerConfig{Models: testModels(), MaxConcurrentAsks: 4, MaxConcurrentAsksPerUser: 1, AuditLogger: discardAuditLogger()})
 	if err != nil {
 		t.Fatal(err)
 	}

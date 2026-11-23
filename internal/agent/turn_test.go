@@ -146,7 +146,7 @@ func TestRunTurnRejectsInvalidHistoryBeforeMCP(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			connectCalls := 0
-			agent, err := New(&scriptedLLM{t: t}, func(context.Context) (MCPSession, error) {
+			agent, err := New(llm.SingleModel(&scriptedLLM{t: t}, "test-model"), func(context.Context) (MCPSession, error) {
 				connectCalls++
 				return &fakeSession{}, nil
 			}, Config{SystemPrompt: testSystemPrompt, MaxIterations: 2, Timeout: time.Minute})

@@ -177,7 +177,7 @@ func TestSearchDocsAuditsTheCallsOfTheAgent(t *testing.T) {
 			)
 		},
 	}}
-	agent, err := New(model, func(context.Context) (MCPSession, error) { return session, nil },
+	agent, err := New(llm.SingleModel(model, "test-model"), func(context.Context) (MCPSession, error) { return session, nil },
 		Config{SystemPrompt: testSystemPrompt, MaxIterations: 3, Timeout: time.Minute, Docs: books})
 	if err != nil {
 		t.Fatal(err)
@@ -225,7 +225,7 @@ func TestSearchDocsEndsTheTurnOnAFailedTransport(t *testing.T) {
 			)
 		},
 	}}
-	agent, err := New(model, func(context.Context) (MCPSession, error) { return session, nil },
+	agent, err := New(llm.SingleModel(model, "test-model"), func(context.Context) (MCPSession, error) { return session, nil },
 		Config{SystemPrompt: testSystemPrompt, MaxIterations: 3, Timeout: time.Minute, Docs: books})
 	if err != nil {
 		t.Fatal(err)
@@ -277,7 +277,7 @@ func TestSearchDocsReadsNoVersionOfAToolNotListed(t *testing.T) {
 			)
 		},
 	}}
-	agent, err := New(model, func(context.Context) (MCPSession, error) { return session, nil },
+	agent, err := New(llm.SingleModel(model, "test-model"), func(context.Context) (MCPSession, error) { return session, nil },
 		Config{SystemPrompt: testSystemPrompt, MaxIterations: 3, Timeout: time.Minute, Docs: books})
 	if err != nil {
 		t.Fatal(err)

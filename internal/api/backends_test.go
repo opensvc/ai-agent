@@ -75,7 +75,7 @@ func TestBackendsKeepTheirConversationsApart(t *testing.T) {
 		}
 		backends = append(backends, Backend{Name: name, Conversations: service, Authenticator: authenticator})
 	}
-	handler, err := NewHandler(backends, HandlerConfig{MaxConcurrentAsks: 4, AuditLogger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	handler, err := NewHandler(backends, HandlerConfig{Models: testModels(), MaxConcurrentAsks: 4, AuditLogger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	if err != nil {
 		t.Fatal(err)
 	}

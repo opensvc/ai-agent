@@ -184,7 +184,7 @@ func TestServiceFeedbackSnapshotsTheTurn(t *testing.T) {
 	service, err := conversation.NewService(store, unusedRunner{}, conversation.ServiceConfig{
 		Backend: "om3", FeedbackRetention: 48 * time.Hour,
 		// The agent serving the feedback is not the one that ran the turn.
-		Agent: conversation.NewAgentInfo("v9-current", "gpt-current"),
+		Agent: conversation.NewAgentInfo("v9-current"),
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -23,7 +23,7 @@ func TestCORSPreflightRunsBeforeAuthentication(t *testing.T) {
 		handler, err := NewHandler([]Backend{{Name: "om3", Conversations: turnService{run: turnFunc(func(context.Context, string, agent.EmitFunc) error {
 			t.Fatal("preflight reached model")
 			return nil
-		})}, Authenticator: verifier}}, HandlerConfig{MaxConcurrentAsks: 4, AuditLogger: discardAuditLogger(), CORSAllowedOrigins: origins})
+		})}, Authenticator: verifier}}, HandlerConfig{Models: testModels(), MaxConcurrentAsks: 4, AuditLogger: discardAuditLogger(), CORSAllowedOrigins: origins})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -88,7 +88,7 @@ func TestCORSActualRequestsKeepAuthenticationAndNonBrowserClients(t *testing.T) 
 			checks++
 			return auth.Identity{}, auth.ErrInvalidToken
 		})
-		handler, err := NewHandler([]Backend{{Name: "om3", Conversations: turnService{run: turnFunc(func(context.Context, string, agent.EmitFunc) error { return nil })}, Authenticator: verifier}}, HandlerConfig{MaxConcurrentAsks: 4, AuditLogger: discardAuditLogger(), CORSAllowedOrigins: origins})
+		handler, err := NewHandler([]Backend{{Name: "om3", Conversations: turnService{run: turnFunc(func(context.Context, string, agent.EmitFunc) error { return nil })}, Authenticator: verifier}}, HandlerConfig{Models: testModels(), MaxConcurrentAsks: 4, AuditLogger: discardAuditLogger(), CORSAllowedOrigins: origins})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -144,7 +144,7 @@ func TestCORSPreservesStreamingConversationTurns(t *testing.T) {
 		service := conversationServiceFuncs{prepare: func(context.Context, auth.Identity, string, string) (conversation.TurnExecution, error) {
 			return execution, nil
 		}}
-		handler, err := NewHandler([]Backend{{Name: "om3", Conversations: service, Authenticator: allowTestTokenVerifier()}}, HandlerConfig{MaxConcurrentAsks: 4, AuditLogger: discardAuditLogger(), CORSAllowedOrigins: origins})
+		handler, err := NewHandler([]Backend{{Name: "om3", Conversations: service, Authenticator: allowTestTokenVerifier()}}, HandlerConfig{Models: testModels(), MaxConcurrentAsks: 4, AuditLogger: discardAuditLogger(), CORSAllowedOrigins: origins})
 		if err != nil {
 			t.Fatal(err)
 		}

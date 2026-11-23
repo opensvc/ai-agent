@@ -84,7 +84,7 @@ func TestRouteSelectsItsBackend(t *testing.T) {
 			Authenticator: allowTestTokenVerifier(),
 		}
 	}
-	handler, err := NewHandler([]Backend{backend("om3"), backend("oc3")}, HandlerConfig{MaxConcurrentAsks: 4, AuditLogger: discardAuditLogger()})
+	handler, err := NewHandler([]Backend{backend("om3"), backend("oc3")}, HandlerConfig{Models: testModels(), MaxConcurrentAsks: 4, AuditLogger: discardAuditLogger()})
 	if err != nil {
 		t.Fatal(err)
 	}

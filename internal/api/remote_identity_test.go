@@ -110,7 +110,7 @@ func TestRemoteIdentityProtectsLocalConversationsAndModelCalls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler, err := NewHandler([]Backend{{Name: "om3", Conversations: service, Authenticator: om3.NewAuthenticator(mcpClient)}}, HandlerConfig{MaxConcurrentAsks: 4, AuditLogger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	handler, err := NewHandler([]Backend{{Name: "om3", Conversations: service, Authenticator: om3.NewAuthenticator(mcpClient)}}, HandlerConfig{Models: testModels(), MaxConcurrentAsks: 4, AuditLogger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	if err != nil {
 		t.Fatal(err)
 	}

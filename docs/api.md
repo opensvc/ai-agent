@@ -36,6 +36,7 @@ The routes of a backend, here `om3`; `oc3` has the same routes under
 | `POST /v1/om3/conversations/{id}/runs` | Send a prompt, or answer a pending action, streamed in AG-UI; see [Runs](#runs) |
 | `POST /v1/om3/runs` | Run one prompt for a client no user watches, read-only, nothing stored; see [Unattended runs](#unattended-runs) |
 | `GET /v1/om3/capabilities` | What the runs route can do, as an AG-UI `AgentCapabilities` |
+| `GET /v1/om3/models` | The models a run chooses from; see [Models](#models) |
 | `GET /v1/om3/tools` | The tools the assistant may call for the caller; see [Tools](#tools) |
 | `PUT /v1/om3/conversations/{id}/turns/{turn_id}/feedback` | Give or replace the feedback on a turn |
 | `DELETE /v1/om3/conversations/{id}/turns/{turn_id}/feedback` | Withdraw it |
@@ -47,8 +48,8 @@ Every audit line of the agent carries it as `request_id`, and the agent
 forwards it to the MCP of the backend, whose audit lines carry it too: one ID
 follows a request from the agent to its tool calls.
 
-Each model call of a run has its audit line `llm_usage`: its `iteration`, its
-tokens, `input_tokens` counting those the provider read from its cache,
+Each model call of a run has its audit line `llm_usage`: its `model_id`, its
+`iteration`, its tokens, `input_tokens` counting those the provider read from its cache,
 `cache_read_tokens`, and wrote to it, `cache_write_tokens`, 0 when the
 protocol does not tell, and its timing on the clock of the agent, `duration_ms` from the
 request to the usage the provider reports, and `first_event_ms` to the first
@@ -65,7 +66,7 @@ such as an action the user confirmed. A wait over 20 s, a request that
 would start less than 10 s before the timeout of the run, a spent quota
 (`insufficient_quota`) or a request that gave an event, such as text the
 client was shown, fail the run as before. Each request sent again has its
-audit line `llm_retried`: its `iteration`, its `attempt`, the HTTP `status`
+audit line `llm_retried`: its `model_id`, its `iteration`, its `attempt`, the HTTP `status`
 of the failure, 0 for an error of the stream, and its `wait_ms`.
 
 `GET /openapi.json` returns the OpenAPI 3.1 description of these routes, their
@@ -186,7 +187,8 @@ Only one turn runs at a time in a conversation.
   `started_at` and `ended_at`; `steps_omitted` past 64 steps, or all of them
   when the message holds in no page with its steps. It carries the
   `runs` of the turn too, `started_at` and `ended_at`, the waits for a
-  decision left out, and its `usage`, `total_tokens`. Times are milliseconds
+  decision left out, its `usage`, `total_tokens`, and its `model_id`, the
+  model the turn last ran on, absent for a turn recorded before. Times are milliseconds
   of the clock of the agent, the timestamps the stream carried; a turn
   stored before they were has none, its steps in their order. A turn waiting
   on a confirmation is not in the history: its steps come back with the
@@ -255,8 +257,9 @@ authentication headers of the backend:
   `{message, skippedContentParts}`; a message without a text part is
   refused. The agent keeps its own history: the other messages are
   not read, so that a client cannot put words in the mouth of the assistant
-  or of a tool, but the answers to the calls of its tools, below. Nor are
-  `state` or `forwardedProps`.
+  or of a tool, but the answers to the calls of its tools, below. Nor is
+  `state`; of `forwardedProps`, only `model`, the model of a new prompt:
+  see [Models](#models).
 - `context` is the context of the interface of a new prompt; see
   [Interface context](#interface-context).
 - `tools` are the tools of the client, which the agent offers to the model;
@@ -507,7 +510,8 @@ route, for a client to shape its interface before a run: `transport`
 undeclared, `humanInTheLoop`
 `approvals`, `interrupts` and `approveWithEdits`, `multimodal` `input` text
 only, and `custom` `feedback`, always present: true, or false when the
-operator turned the [feedback](#feedback) off. `HttpAgent` does not read it: a client
+operator turned the [feedback](#feedback) off, and `models`, true: the runs
+choose their [model](#models). `HttpAgent` does not read it: a client
 subclassing it implements `getCapabilities()` with it.
 
 ### Unattended runs
@@ -520,7 +524,9 @@ question or confirm an action, and nothing is stored.
   user, the prompt, without history. `tools` must be empty or absent and
   `resume` absent, or 400 (`invalid_tools`, `invalid_decision`,
   `invalid_prompt`). `context`, optional, scopes the question as for a
-  conversation run, with the same bounds (`invalid_context`). `threadId` and `runId` are any IDs of the client, at
+  conversation run, with the same bounds (`invalid_context`), and
+  `forwardedProps.model`, optional, chooses its model, as for a new prompt
+  (`model_unknown`); see [Models](#models). `threadId` and `runId` are any IDs of the client, at
   most 128 printable bytes: nothing is stored under them, and the audit
   carries `run_id`, with the `request_id` the response returns, to find the
   run in the logs of both sides.
@@ -577,6 +583,59 @@ end with an ellipsis, its `description`, whole, as the model reads it,
 user. A client shows the description and the arguments as plain text: they
 come from the MCP. The whole catalog of om3-mcp weighs about 110 KiB. The answer is not cached (`Cache-Control: no-store`); an MCP that does
 not answer gives 502 `tools_unavailable`.
+
+### Models
+
+`GET /v1/{backend}/models` lists the models the runs of the caller choose
+from, the default first, for a client to offer the choice:
+
+```json
+{"models": [
+  {"id": "default", "label": "GPT Luna", "default": true, "ready": true},
+  {"id": "haiku", "label": "Claude Haiku", "default": false, "ready": true}
+]}
+```
+
+The operator declares them, the default of the `OPENSVC_AI_LLM_*` variables,
+of ID `default`, and those of `OPENSVC_AI_MODELS`; see the
+[README](../README.md#several-models). Each gives its `id`, opaque to the
+client, at most 64 bytes, its `label`, at most 64 characters, whether it is
+the `default`, and whether the caller can run on it, `ready`, always true
+today: a client shows a model that is not without offering it. Neither its
+provider, nor its URL, nor its authentication leave the agent. The list is
+the same for every backend and user; the answer is not cached
+(`Cache-Control: no-store`). `custom.models`, true in the capabilities,
+tells the route is served: a client of an agent without it offers no choice,
+and sends no model.
+
+A run names its model in `forwardedProps.model`, the `id` of the list:
+
+```json
+{"threadId": "...", "runId": "...", "messages": [...], "forwardedProps": {"model": "haiku"}}
+```
+
+- Absent, null, or with `forwardedProps` absent or not an object, the run
+  is on the default model. The other members of `forwardedProps` are
+  ignored.
+- A model that is not a string of 1 to 64 bytes, or not of the list, is
+  refused with 400 `model_unknown` before the conversation is read and
+  before the stream starts; the audit keeps the code, not the value.
+- A new turn runs on its model from its start to its end. A run answering a
+  confirmation or the calls of the tools of the client resumes the turn on
+  the model it started on, and does not read `model`; on the default model
+  when the operator removed it meanwhile. The reasoning a model gives back
+  lives as long as the run and is never stored, so the next turn of the
+  conversation may run on another model: it reads the stored history.
+- The audit line of a run of a new prompt carries `model_id`; `llm_usage`
+  and `llm_retried` carry the `model_id` of each model call, resumed runs
+  included. The last assistant message of a turn carries its `model_id`, for
+  a client to offer again the model of the conversation it opens.
+- The history of a conversation holds the IDs of the tool calls of each
+  model it ran on, which the providers of the agent take from one another.
+  An ID a provider would refuse, the ID of an earlier call, as a server
+  numbering its calls from zero at each answer gives, or one out of letters,
+  digits, `-` and `_`, is renamed in the requests only; the history, the
+  stream and the audit keep it.
 
 `go test -tags agui_conformance ./internal/api/` runs the official client,
 `@ag-ui/client` at the version `internal/api/testdata/agui` pins, 1.0.3,

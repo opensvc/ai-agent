@@ -18,7 +18,7 @@ func (f toolListerFunc) Tools(ctx context.Context) ([]agent.ToolInfo, error) { r
 
 func newToolsTestHandler(t *testing.T, tools ToolLister) http.Handler {
 	t.Helper()
-	handler, err := NewHandler([]Backend{{Name: "om3", Conversations: turnService{}, Authenticator: allowTestTokenVerifier(), Tools: tools}}, HandlerConfig{MaxConcurrentAsks: 4, AuditLogger: discardAuditLogger()})
+	handler, err := NewHandler([]Backend{{Name: "om3", Conversations: turnService{}, Authenticator: allowTestTokenVerifier(), Tools: tools}}, HandlerConfig{Models: testModels(), MaxConcurrentAsks: 4, AuditLogger: discardAuditLogger()})
 	if err != nil {
 		t.Fatal(err)
 	}

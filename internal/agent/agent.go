@@ -60,7 +60,7 @@ type Config struct {
 }
 
 type Agent struct {
-	llm        llm.Client
+	models     *llm.Models
 	connectMCP MCPConnectFunc
 	config     Config
 	indexes    *indexCache
@@ -78,6 +78,15 @@ type TurnResult struct {
 	MCP MCPServer
 	// Exposure describes what the model was given.
 	Exposure Exposure
+	// Model is the model the turn ran on: its ID and its name.
+	Model TurnModel
+}
+
+// TurnModel is the model of a turn: the ID the agent offers it under and
+// its name at the provider.
+type TurnModel struct {
+	ID   string
+	Name string
 }
 
 // Exposure is what the model of a turn was given: a hash of the system
@@ -104,9 +113,9 @@ type MCPServer struct {
 	ToolsSHA256 string
 }
 
-func New(llmClient llm.Client, connectMCP MCPConnectFunc, config Config) (*Agent, error) {
-	if llmClient == nil {
-		return nil, fmt.Errorf("agent LLM client is nil")
+func New(models *llm.Models, connectMCP MCPConnectFunc, config Config) (*Agent, error) {
+	if models == nil {
+		return nil, fmt.Errorf("agent models are nil")
 	}
 	if connectMCP == nil {
 		return nil, fmt.Errorf("agent MCP connector is nil")
@@ -123,7 +132,7 @@ func New(llmClient llm.Client, connectMCP MCPConnectFunc, config Config) (*Agent
 	if config.Now == nil {
 		config.Now = time.Now
 	}
-	return &Agent{llm: llmClient, connectMCP: connectMCP, config: config, indexes: &indexCache{}}, nil
+	return &Agent{models: models, connectMCP: connectMCP, config: config, indexes: &indexCache{}}, nil
 }
 
 // RunTurn executes one user turn after a complete provider-neutral history.
@@ -141,7 +150,11 @@ func (a *Agent) RunTurn(ctx context.Context, history []llm.Message, prompt strin
 	if err := ValidateInterfaceContext(interfaceContext); err != nil {
 		return result, err
 	}
-	return a.run(ctx, history, &SuspendedTurn{Messages: []llm.Message{{Role: llm.RoleUser, Text: prompt}}, InterfaceContext: interfaceContext}, "", emit)
+	model, err := a.newTurnModel(ctx)
+	if err != nil {
+		return result, err
+	}
+	return a.run(ctx, history, &SuspendedTurn{Messages: []llm.Message{{Role: llm.RoleUser, Text: prompt}}, InterfaceContext: interfaceContext, ModelID: model.ID}, model, "", emit)
 }
 
 // ResumeTurn continues a suspended turn with the decision of the user on its
@@ -164,13 +177,20 @@ func (a *Agent) ResumeTurn(ctx context.Context, history []llm.Message, suspended
 	state.Results = append([]llm.ToolResult(nil), suspended.Results...)
 	state.ClientCalls = append([]string(nil), suspended.ClientCalls...)
 	state.ClientResults = append([]llm.ToolResult(nil), suspended.ClientResults...)
-	return a.run(ctx, history, &state, decision, emit)
+	model, err := a.resumedTurnModel(ctx, suspended.ModelID)
+	if err != nil {
+		return result, err
+	}
+	state.ModelID = model.ID
+	return a.run(ctx, history, &state, model, decision, emit)
 }
 
 // run drives the turn held by state until the model answers, or until a tool
 // call requires a confirmation. decision applies to the first call left to
 // run, the one a suspended turn waits on.
-func (a *Agent) run(ctx context.Context, history []llm.Message, state *SuspendedTurn, decision Decision, consume EmitFunc) (result TurnResult, err error) {
+func (a *Agent) run(ctx context.Context, history []llm.Message, state *SuspendedTurn, model llm.Model, decision Decision, consume EmitFunc) (result TurnResult, err error) {
+	// The model is told with a failure too: the run of a turn records it.
+	result.Model = TurnModel{ID: model.ID, Name: model.Name}
 	if consume == nil {
 		return result, fmt.Errorf("agent event consumer is nil")
 	}
@@ -281,6 +301,7 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 			turn.Suspended.Messages = withoutReasoning(turn.Suspended.Messages)
 		}
 		turn.MCP = result.MCP
+		turn.Model = TurnModel{ID: model.ID, Name: model.Name}
 		turn.Exposure = Exposure{
 			SystemPromptSHA256: hex.EncodeToString(promptSum[:]), ToolSearch: selection.search,
 			SearchScoreRatio: selection.scoreRatio, ShownTools: slices.Clone(selection.shown),
@@ -596,7 +617,7 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 		}
 		// The question that ran every tool it may asks for the answer too.
 		lastCall := iteration == a.config.MaxIterations || state.TotalToolCalls >= maxToolCallsPerAsk
-		request := llm.Request{Messages: messages, Tools: requestTools, NoToolCall: lastCall}
+		request := llm.Request{Messages: withSendableCallIDs(messages), Tools: requestTools, NoToolCall: lastCall}
 		// The model call is timed on the clock of the agent: until its first
 		// event, the wait of the provider, and until its usage, the whole call.
 		var (
@@ -632,7 +653,7 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 				reasoning = &llm.Reasoning{Protocol: event.Reasoning.Protocol, Data: append(json.RawMessage(nil), event.Reasoning.Data...)}
 			case llm.EventUsage:
 				usage := *event.Usage
-				return emitAgentEvent(emit, Event{Type: EventUsage, Usage: &usage, Iteration: iteration, ModelDuration: time.Since(modelStart), ModelFirstEvent: firstEvent})
+				return emitAgentEvent(emit, Event{Type: EventUsage, Usage: &usage, Iteration: iteration, ModelDuration: time.Since(modelStart), ModelFirstEvent: firstEvent, ModelID: model.ID})
 			case llm.EventCompleted:
 				if completion {
 					return fmt.Errorf("LLM emitted multiple completion events")
@@ -647,7 +668,7 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 		// calls it ran, such as an action the user confirmed.
 		for attempt := 0; ; attempt++ {
 			modelStart, firstEvent = time.Now(), 0
-			err := a.llm.Stream(llmContext, request, consumeModel)
+			err := model.Client.Stream(llmContext, request, consumeModel)
 			if err == nil {
 				break
 			}
@@ -655,7 +676,7 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 			if firstEvent != 0 || !ok {
 				return result, fmt.Errorf("run LLM iteration %d: %w", iteration, err)
 			}
-			if err := emitAgentEvent(emit, Event{Type: EventModelRetried, Retry: &retry, Iteration: iteration}); err != nil {
+			if err := emitAgentEvent(emit, Event{Type: EventModelRetried, Retry: &retry, Iteration: iteration, ModelID: model.ID}); err != nil {
 				return result, err
 			}
 			if err := waitModelRetry(ctx, retry.Wait); err != nil {

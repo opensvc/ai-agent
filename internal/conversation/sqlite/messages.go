@@ -117,6 +117,9 @@ LIMIT ?`, conversation.MaxMessagePageBytes, id, beforeTurn, beforeTurn, beforeMe
 				return conversation.MessagePage{}, err
 			}
 			item.Steps, item.StepsOmitted, item.Runs, item.Usage = conversation.DisplayTurn(messages, turn.Timing)
+			if last := len(turn.Runs) - 1; last >= 0 {
+				item.ModelID = turn.Runs[last].ModelID
+			}
 		}
 		encoded, err := json.Marshal(item)
 		if err != nil {

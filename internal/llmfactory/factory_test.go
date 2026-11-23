@@ -121,3 +121,31 @@ func TestEnvironmentTokenSource(t *testing.T) {
 		t.Fatal("empty environment token accepted")
 	}
 }
+
+func TestNewModelsCreatesTheClientOfEachModel(t *testing.T) {
+	llmConfig := func(protocol string) config.LLMConfig {
+		return config.LLMConfig{Protocol: protocol, BaseURL: "https://llm.example.test/v1", Model: protocol + "-model", AuthMode: config.LLMAuthModeNone, Timeout: time.Minute, MaxOutputTokens: 1024}
+	}
+	models, err := NewModels([]config.ModelConfig{
+		{ID: llm.DefaultModelID, Label: "Default", LLM: llmConfig(config.LLMProtocolResponses)},
+		{ID: "haiku", Label: "Claude Haiku", LLM: llmConfig(config.LLMProtocolMessages)},
+	}, http.DefaultClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	haiku, err := models.Resolve(t.Context(), "haiku")
+	if err != nil || haiku.Label != "Claude Haiku" || haiku.Name != "messages-model" {
+		t.Fatalf("haiku = %+v, %v", haiku, err)
+	}
+	if _, ok := haiku.Client.(*messages.Client); !ok {
+		t.Fatalf("haiku client = %T", haiku.Client)
+	}
+	if _, ok := models.Default().Client.(*responses.Client); !ok {
+		t.Fatalf("default client = %T", models.Default().Client)
+	}
+	bad := llmConfig(config.LLMProtocolResponses)
+	bad.BaseURL = "ftp://llm.example.test"
+	if _, err := NewModels([]config.ModelConfig{{ID: llm.DefaultModelID, Label: "Default", LLM: llmConfig(config.LLMProtocolResponses)}, {ID: "bad", Label: "Bad", LLM: bad}}, nil); err == nil || !strings.Contains(err.Error(), `model "bad"`) {
+		t.Fatalf("invalid model error = %v", err)
+	}
+}

@@ -336,3 +336,38 @@ func TestDisplayMessagesServeTheStepsOfATurnCutByTheCursorOnce(t *testing.T) {
 		t.Fatalf("older = %+v, %v", older, err)
 	}
 }
+
+// The last assistant message of a turn names the model the turn last ran
+// on, for the client to offer it again; a turn recorded before runs had
+// the ID of their model names none.
+func TestDisplayMessagesServeTheModelOfATurn(t *testing.T) {
+	store, _ := openTestStore(t, Config{})
+	item := testConversation("conversation-1", testOwner, testNow)
+	if err := store.CreateConversation(t.Context(), item); err != nil {
+		t.Fatal(err)
+	}
+	for index, run := range []conversation.TurnRun{{Model: "gpt-luna"}, {Model: "claude-haiku", ModelID: "haiku"}} {
+		turnID := fmt.Sprintf("turn-%d", index+1)
+		at := testNow.Add(time.Duration(index+1) * time.Minute)
+		if _, err := store.BeginTurn(t.Context(), testOwner, item.ID, turnID, at); err != nil {
+			t.Fatal(err)
+		}
+		messages := []llm.Message{{Role: llm.RoleUser, Text: "check"}, {Role: llm.RoleAssistant, Text: "checked"}}
+		if err := store.CompleteTurn(t.Context(), testOwner, item.ID, turnID, at.Add(time.Second), at.Add(time.Hour), messages, run, conversation.TurnTiming{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, err := store.ListMessages(t.Context(), testOwner, item.ID, conversation.MessageQuery{})
+	if err != nil || len(page.Messages) != 4 {
+		t.Fatalf("page = %+v, %v", page, err)
+	}
+	// In their order: the answer of the second turn only names a model.
+	models := []string{page.Messages[0].ModelID, page.Messages[1].ModelID, page.Messages[2].ModelID, page.Messages[3].ModelID}
+	if models[0] != "" || models[1] != "" || models[2] != "" || models[3] != "haiku" {
+		t.Fatalf("models = %q, page = %+v", models, page.Messages)
+	}
+	encoded, _ := json.Marshal(page.Messages[1])
+	if strings.Contains(string(encoded), "model_id") {
+		t.Fatalf("a turn without a model ID names one: %s", encoded)
+	}
+}

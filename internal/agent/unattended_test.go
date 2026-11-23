@@ -37,7 +37,7 @@ func unattendedCatalog() []*mcp.Tool {
 
 func unattendedAgent(t *testing.T, model llm.Client, session MCPSession) *Agent {
 	t.Helper()
-	agent, err := New(model, func(context.Context) (MCPSession, error) { return session, nil },
+	agent, err := New(llm.SingleModel(model, "test-model"), func(context.Context) (MCPSession, error) { return session, nil },
 		Config{SystemPrompt: testSystemPrompt, MaxIterations: 4, Timeout: time.Minute})
 	if err != nil {
 		t.Fatal(err)

@@ -87,6 +87,10 @@ const result = await agent.runAgent({ runId: crypto.randomUUID() }, {
 - The prompt is the last message, a message of the user. The agent keeps
   the history of the conversation itself and reads no other message of the
   client, but the answers to the calls of its tools (section 6).
+- `forwardedProps.model`, optional, is the ID of the model of the prompt,
+  among those of `GET /v1/{backend}/models` (section 7), which the parameters of
+  `runAgent` carry: `{ runId, forwardedProps: { model: "haiku" } }`. Absent, the default
+  model; unknown, 400 `model_unknown`.
 - `internal/api/testdata/agui/conformance.mjs`, in the repository of the
   agent, is a complete client: runs, a confirmation and its resume, a tool
   of the client, and a resynchronization.
@@ -183,7 +187,10 @@ await agent.runAgent({ runId, tools }, subscriber);
 
 `GET /v1/{backend}/capabilities` answers the AG-UI `AgentCapabilities` of
 the runs: streaming, the tools of the client, the interrupts with edits of
-the arguments, and in `custom.feedback` whether the turns take a feedback.
+the arguments, in `custom.feedback` whether the turns take a feedback, and
+in `custom.models` that the runs choose their model among those
+`GET /v1/{backend}/models` lists, by `id` and `label`, the default first; see
+the [API](api.md#models).
 `HttpAgent` does not read them; a subclass exposes them:
 
 ```javascript
