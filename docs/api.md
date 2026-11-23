@@ -281,14 +281,20 @@ authentication headers of the backend:
   resumed run ends with `RUN_ERROR` `agent_failed` and nothing runs; no later
   call of the answer takes the decision. The user asks again.
 
-The system prompt of every turn tells the model how to change several
-records, wherever the question comes from: the records asked, all of them and
-no other, by one call of a tool that takes several or one call for each; a set
-a criterion gives, such as a filter, counted and said with the call; no id
-or name made up; no confirmation asked in its answer, the agent asking for a
-destructive call itself; the totals reported as the tool results confirm
-them. An approval tells it to finish what the user asked, each other call
-confirmed on its own.
+The system prompt of every turn tells the model how to make a change,
+wherever the question comes from: a question of the same message answered
+first, in full; then, before the calls that change state, in the same
+response, what leads to them and what they will change, in one or two
+sentences, for several records their count and what selects them, never
+their list, a set a criterion gives, such as a filter, counted before the
+change; no confirmation asked in its answer, the agent asking for a
+destructive call itself; the records asked, all of them and no other, by one
+call of a tool that takes several or one call for each; no id or name made
+up; after the calls, their result and what is left of what the user asked,
+without repeating the text before them, the totals as the tool results
+confirm them. The text of a response streams before its calls, so before
+their confirmation. An approval tells it to finish what the user asked, each
+other call confirmed on its own.
 
 Errors before the stream are JSON errors, `{"error": {"code", "message"}}`,
 the codes the OpenAPI description lists. The stream is `text/event-stream`,

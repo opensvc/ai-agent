@@ -140,6 +140,10 @@ request of the model alone: the run ends with `RUN_FINISHED`, `outcome`
   describe the action otherwise. Show an argument of `argumentTypes` by its
   type, a YAML as YAML with its lines and indentation, and any text holding
   line breaks with its whitespace kept.
+- Show above it the text the model wrote before the call, its `TEXT_MESSAGE_*`
+  events: what leads to the action and what it will change, after the answer
+  to a question of the same message. It is an explanation; the arguments
+  alone say what runs.
 - Count down to `expiresAt`, 10 minutes: past it, the turn fails and the
   call does not run.
 - Answer with a new run on the same thread, `resume`:
