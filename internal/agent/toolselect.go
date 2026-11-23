@@ -227,12 +227,12 @@ func (a *Agent) selectTools(mcpTools []*mcp.Tool, converted []llm.Tool, catalogH
 }
 
 // searchShown gives the tools a search_tools result showed, in its order: none
-// for a refused search, or a result the history compaction cut. It relies on
-// the compaction keeping a search result whole: the compaction reduces the
-// results with a structured content only, and a search result has a text
-// content alone. A search result with a structured content, or a
-// compaction of the text results, would silently forget the searches of the
-// former turns: TestCompactHistoryKeepsASearchResultWhole holds it.
+// for a refused search, or a result the history compaction reduced. It relies
+// on the compaction keeping whole the searches of the last turn and of the
+// last turn that searched, which it reads by the name of their calls: the
+// compaction reduces the former searches as any other text.
+// TestCompactHistoryKeepsASearchResultWhole and
+// TestCompactHistoryReadsTheToolOfEachTurn hold it.
 func searchShown(result llm.ToolResult) []string {
 	if result.IsError {
 		return nil

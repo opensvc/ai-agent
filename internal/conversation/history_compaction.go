@@ -10,13 +10,14 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/opensvc/ai-agent/internal/agent"
 	"github.com/opensvc/ai-agent/internal/llm"
 )
 
 // HistoryCompactionPolicy names the compaction of the history below; it is
 // recorded with each run, so that a change of policy is visible in the
 // feedback.
-const HistoryCompactionPolicy = "v1"
+const HistoryCompactionPolicy = "v2"
 
 // HistoryCompaction bounds the tool results of the earlier turns a model
 // request carries. The stored messages are never changed: the model
@@ -39,7 +40,7 @@ type HistoryCompaction struct {
 	MaxDepth int
 }
 
-// DefaultHistoryCompaction is the experimental first policy.
+// DefaultHistoryCompaction is the policy of the agent.
 var DefaultHistoryCompaction = HistoryCompaction{
 	MaxResultBytes:        2 << 10,
 	MaxHistoryResultBytes: 16 << 10,
@@ -122,21 +123,48 @@ func (c HistoryCompaction) validate() error {
 	return nil
 }
 
+// searchTool is the tool whose results the agent reads back: searchShown
+// gives the tools a search of the former turns showed. Its results are kept
+// whole in the last turn and in the last turn that searched, those the
+// agent reads them from; elsewhere they are a text as any other.
+const searchTool = agent.SearchToolName
+
 // compactHistory returns a copy of history whose tool results fit the
 // policy, what it did, and the indexes of the messages holding a compacted
-// result, one per result. Small results and errors are kept as they are;
-// the structured results are compacted, the oldest more strongly when all
-// the results exceed MaxHistoryResultBytes. When they still exceed it, the
-// oldest turn is left out whole and the turns kept are compacted again from
-// their original results, so that a turn left out frees its room for the
-// others. Calls, arguments and call IDs are kept.
+// result, one per result. Small results, errors and the searches the agent
+// reads back are kept as they are; the structured results are compacted,
+// the oldest more strongly when all the results exceed
+// MaxHistoryResultBytes, then reduced to a marker with the text results,
+// the oldest first. When they still exceed it, the oldest turn is left out
+// whole and the turns kept are compacted again from their original results,
+// so that a turn left out frees its room for the others. The last turn is
+// never left out, and over the budget alone, the turns before it are left
+// out only while their own results exceed the budget: the model never
+// loses the turn the user answers, nor the earlier ones for nothing. Calls,
+// arguments and call IDs are kept.
 func compactHistory(history []llm.Message, policy HistoryCompaction) ([]llm.Message, HistoryStats, []int) {
 	policy = policy.withDefaults()
 	stats := HistoryStats{Policy: HistoryCompactionPolicy, MaxResultBytes: policy.MaxResultBytes, MaxHistoryResultBytes: policy.MaxHistoryResultBytes}
+	last := 0
+	for i, message := range history {
+		if message.Role == llm.RoleUser {
+			last = i
+		}
+	}
+	floor := -1
 	start := 0
 	for {
 		messages, total, compacted := policy.compactTurns(history[start:])
-		if total <= policy.MaxHistoryResultBytes || start >= len(history) {
+		if total <= policy.MaxHistoryResultBytes || start >= last {
+			stats.CompactedResults = len(compacted)
+			return messages, stats, compacted
+		}
+		// The last turn over the budget alone: leaving the turns before it
+		// out cannot bring the results under it.
+		if floor < 0 {
+			_, floor, _ = policy.compactTurns(history[last:])
+		}
+		if floor > policy.MaxHistoryResultBytes && resultBytes(messages[:last-start]) <= policy.MaxHistoryResultBytes {
 			stats.CompactedResults = len(compacted)
 			return messages, stats, compacted
 		}
@@ -150,53 +178,145 @@ func compactHistory(history []llm.Message, policy HistoryCompaction) ([]llm.Mess
 	}
 }
 
+// resultBytes is the size of the tool results of messages.
+func resultBytes(messages []llm.Message) int {
+	size := 0
+	for _, message := range messages {
+		for _, result := range message.ToolResults {
+			size += len(result.Content)
+		}
+	}
+	return size
+}
+
 // compactTurns compacts the results of history, the oldest more strongly
 // when they exceed the global budget, and returns the copy, the size of its
 // results and the indexes of the messages holding a compacted result.
 func (c HistoryCompaction) compactTurns(history []llm.Message) ([]llm.Message, int, []int) {
-	messages := make([]llm.Message, len(history))
 	type ref struct{ message, result int }
 	var refs []ref
+	// The name of the tool of each result, read from the calls before it:
+	// call IDs repeat from a turn to the next with some providers.
+	searches := map[ref]int{}
+	searched, turn := -1, -1
+	var calls map[string]string
 	for i, message := range history {
-		message.ToolCalls = slices.Clone(message.ToolCalls)
-		message.ToolResults = slices.Clone(message.ToolResults)
-		for j := range message.ToolResults {
-			refs = append(refs, ref{i, j})
+		if message.Role == llm.RoleUser {
+			turn++
 		}
-		messages[i] = message
-	}
-	compacted := map[ref]bool{}
-	set := func(r ref, budget int) {
-		original := history[r.message].ToolResults[r.result]
-		result := &messages[r.message].ToolResults[r.result]
-		if original.IsError || len(original.Content) <= budget {
-			return
-		}
-		if content, ok := c.compactResult(original.Content, budget); ok && len(content) < len(result.Content) {
-			result.Content = content
-			compacted[r] = true
-		}
-	}
-	total := func() int {
-		size := 0
-		for _, message := range messages {
-			for _, result := range message.ToolResults {
-				size += len(result.Content)
+		if len(message.ToolCalls) > 0 {
+			calls = map[string]string{}
+			for _, call := range message.ToolCalls {
+				calls[call.ID] = call.Name
 			}
 		}
-		return size
+		for j, result := range message.ToolResults {
+			refs = append(refs, ref{i, j})
+			if calls[result.CallID] == searchTool {
+				searches[ref{i, j}] = turn
+				searched = turn
+			}
+		}
 	}
-	for _, r := range refs {
-		set(r, c.MaxResultBytes)
+	kept := func(r ref) bool {
+		if history[r.message].ToolResults[r.result].IsError {
+			return true
+		}
+		at, ok := searches[r]
+		return ok && (at == turn || at == searched)
 	}
-	// Over the global budget, the oldest results are reduced first, the
-	// last turn last: to a quarter of their budget, then to a marker alone.
-	for _, budget := range []int{c.MaxResultBytes / 4, 0} {
+	// A result compacted to a budget, or to a marker alone for budget 0,
+	// once, as the reductions below try it again.
+	type attempt struct {
+		ref
+		budget int
+	}
+	memo := map[attempt]json.RawMessage{}
+	compact := func(r ref, budget int) (json.RawMessage, bool) {
+		if content, ok := memo[attempt{r, budget}]; ok {
+			return content, content != nil
+		}
+		original := history[r.message].ToolResults[r.result].Content
+		content, ok := c.compactResult(original, budget)
+		if !ok && budget == 0 {
+			content, ok = c.textMarker(original)
+		}
+		if !ok {
+			content = nil
+		}
+		memo[attempt{r, budget}] = content
+		return content, ok
+	}
+	// reduce compacts the results from their originals: those of markers to
+	// a marker alone, the others to their budget, then the oldest to a
+	// quarter of it while the results exceed the global budget.
+	reduce := func(markers map[ref]bool) ([]llm.Message, map[ref]bool, int) {
+		messages := make([]llm.Message, len(history))
+		for i, message := range history {
+			message.ToolCalls = slices.Clone(message.ToolCalls)
+			message.ToolResults = slices.Clone(message.ToolResults)
+			messages[i] = message
+		}
+		compacted := map[ref]bool{}
+		total := resultBytes(messages)
+		set := func(r ref, budget int) {
+			result := &messages[r.message].ToolResults[r.result]
+			if kept(r) || len(result.Content) <= budget {
+				return
+			}
+			if content, ok := compact(r, budget); ok && len(content) < len(result.Content) {
+				total += len(content) - len(result.Content)
+				result.Content = content
+				compacted[r] = true
+			}
+		}
 		for _, r := range refs {
-			if total() <= c.MaxHistoryResultBytes {
+			if markers[r] {
+				set(r, 0)
+			} else {
+				set(r, c.MaxResultBytes)
+			}
+		}
+		for _, r := range refs {
+			if total <= c.MaxHistoryResultBytes {
 				break
 			}
-			set(r, budget)
+			if !markers[r] {
+				set(r, c.MaxResultBytes/4)
+			}
+		}
+		return messages, compacted, total
+	}
+	// Over the global budget, the results are reduced to a marker, the
+	// oldest first, whether structured or text: a text is never cut, and a
+	// text that fits once the structured results are reduced stays whole.
+	// The others are compacted again from their originals, so that a marker
+	// frees its room for them, and the markers that then fit restored, the
+	// most recent first.
+	markers := map[ref]bool{}
+	messages, compacted, total := reduce(markers)
+	for _, r := range refs {
+		if total <= c.MaxHistoryResultBytes {
+			break
+		}
+		content, ok := compact(r, 0)
+		if !ok || kept(r) || len(content) >= len(messages[r.message].ToolResults[r.result].Content) {
+			continue
+		}
+		markers[r] = true
+		messages, compacted, total = reduce(markers)
+	}
+	if len(markers) > 0 && total <= c.MaxHistoryResultBytes {
+		for _, r := range slices.Backward(refs) {
+			if !markers[r] {
+				continue
+			}
+			delete(markers, r)
+			if restored, restoredCompacted, restoredTotal := reduce(markers); restoredTotal <= c.MaxHistoryResultBytes {
+				messages, compacted, total = restored, restoredCompacted, restoredTotal
+			} else {
+				markers[r] = true
+			}
 		}
 	}
 	indexes := make([]int, 0, len(compacted))
@@ -205,7 +325,7 @@ func (c HistoryCompaction) compactTurns(history []llm.Message) ([]llm.Message, i
 			indexes = append(indexes, r.message)
 		}
 	}
-	return messages, total(), indexes
+	return messages, total, indexes
 }
 
 // compactResult compacts a structured result to at most budget bytes, its
@@ -227,11 +347,9 @@ func (c HistoryCompaction) compactResult(raw json.RawMessage, budget int) (json.
 	// adds is dropped, as the agent drops it since C0. Distinct texts, such
 	// as a warning, keep the prefix of those small enough to be kept whole,
 	// so that their indexes stay true, as the items of an array.
-	contents, _ := envelope["content"].([]any)
-	for _, content := range contents {
-		if item, ok := content.(map[string]any); !ok || item["type"] != "text" {
-			return nil, false
-		}
+	contents, ok := textContentsOf(envelope)
+	if !ok {
+		return nil, false
 	}
 	var base []omission
 	var kept []any
@@ -294,6 +412,39 @@ func (c HistoryCompaction) compactResult(raw json.RawMessage, budget int) (json.
 		final = append([]omission{{Path: "/content", Kind: omittedArrayTail, Omitted: len(contents)}}, final...)
 	}
 	return encode(nil, nil, final, false), true
+}
+
+// textMarker replaces a result made of text contents alone, without
+// structured content, by a marker of their omission. It reports false for
+// another result: a structured one, or one with contents other than text.
+func (c HistoryCompaction) textMarker(raw json.RawMessage) (json.RawMessage, bool) {
+	var envelope map[string]any
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return nil, false
+	}
+	if structured, ok := envelope["structuredContent"]; ok && structured != nil {
+		return nil, false
+	}
+	contents, ok := textContentsOf(envelope)
+	if !ok || len(contents) == 0 {
+		return nil, false
+	}
+	marker := historyMarker{Policy: HistoryCompactionPolicy, Partial: true, OriginalBytes: len(raw),
+		Omissions: []omission{{Path: "/content", Kind: omittedArrayTail, Omitted: len(contents)}}}
+	data, _ := json.Marshal(map[string]any{"content": []any{}, "_history_compaction": marker})
+	return data, true
+}
+
+// textContentsOf gives the contents of a result, and reports false when
+// one is not a text: the compaction keeps such a result as it is.
+func textContentsOf(envelope map[string]any) ([]any, bool) {
+	contents, _ := envelope["content"].([]any)
+	for _, content := range contents {
+		if item, ok := content.(map[string]any); !ok || item["type"] != "text" {
+			return nil, false
+		}
+	}
+	return contents, true
 }
 
 // itemSteps are the numbers of items kept per collection, tried in turn.

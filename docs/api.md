@@ -824,11 +824,13 @@ a turn resumed after a confirmation sees the tools it found.
 
 The model receives the earlier turns of a conversation as a compact copy;
 the stored messages, the feedback and the export keep the original results.
-The tool calls, their arguments and call IDs are kept. Small results, errors
-and results without structured content are kept as they are. A structured
-result over 2 KiB is compacted to at most 2 KiB: its scalars and small
-objects of scalars, such as a provenance, are kept, numbers as written and
-strings unchanged; a string over 256 bytes is omitted whole; collections
+The tool calls, their arguments and call IDs are kept. Small results, errors,
+results with contents other than text, such as an image or a resource link,
+and the results of `search_tools` of the last turn and of the last turn that
+searched, from which the agent reads back the tools a former search showed,
+are kept as they are. A structured result over 2 KiB is compacted to at
+most 2 KiB: its scalars and small objects of scalars, such as a provenance,
+are kept, numbers as written and strings unchanged; a string over 256 bytes is omitted whole; collections
 keep their first items, 8 at first, fewer until the result fits, and an
 array keeps the prefix before its first item it cannot keep whole, so that
 the indexes stay true; an object of more than 32 entries, such as a status
@@ -841,15 +843,29 @@ indexes stay true. The budget holds for the whole result, texts and marker
 included: the texts kept are dropped before the structured content, and the
 last resort is a marker alone. The keys of a compacted object are sorted.
 
-Beyond 16 KiB of tool results in the history, the oldest results are
-reduced further, down to a marker alone. When they still exceed it, the
-oldest turn is left out whole and the turns kept are compacted again from
-their original results. A policy given to the service is completed with the
-default values of its fields left at zero, and refused when invalid.
+Beyond 16 KiB of tool results in the history, the oldest structured
+results are reduced further, to a quarter of their budget. When they still
+exceed it, results are replaced by a marker alone, the oldest first, whether
+structured or of text alone, without structured content, such as one of
+`search_docs`, `search_code`, a skill, a resource or a former `search_tools`:
+a text is never cut, and stays whole while the history fits once the
+structured results are reduced. The call and its arguments stay, so that the
+model can run it again, and the other results are compacted again from their
+originals, so that a marker frees its room for them. When the results still
+exceed 16 KiB, the oldest turn is left out whole and the turns kept are
+compacted again from their original results. The compaction never leaves the
+last turn out: over the budget alone, it is sent compacted, over 16 KiB, and
+the turns before it are left out only while their own results exceed 16
+KiB, so that the model reads the turn the user follows up and the earlier
+ones. The bounds of the history, in messages and in bytes, still apply after
+it, and leave the oldest turns out. A policy given to the service is
+completed with the default values of its fields left at zero, and refused
+when invalid.
 
-A compacted result carries a `_history_compaction` field: the policy
-(`v1`), `partial`, the original size, and its omissions, at most 16, each a
-JSON pointer into the result with its kind (`array_tail`, `object_entries`,
+A compacted result carries a `_history_compaction` field: the policy (`v2`;
+`v1` kept the text results whole and could leave every turn out),
+`partial`, the original size, and its omissions, at most 16, each a JSON
+pointer into the result with its kind (`array_tail`, `object_entries`,
 `long_string`, `depth`, `content`, `value`) and the items kept and omitted;
 no artificial item is added to the data. The system prompt tells the model
 that omitted data is unknown, to read omitted details again with a read-only
