@@ -154,7 +154,11 @@ func buildCreateRequest(model string, maxTokens int, request llm.Request, replay
 					return createRequest{}, fmt.Errorf("Messages history has an unmatched or duplicate tool result")
 				}
 				delete(pending, toolResult.CallID)
-				blocks = append(blocks, wireBlock{Type: "tool_result", ToolUseID: toolResult.CallID, Content: string(toolResult.Content), IsError: toolResult.IsError})
+				content := string(toolResult.Content)
+				if text, ok := toolResult.PlainText(); ok {
+					content = text
+				}
+				blocks = append(blocks, wireBlock{Type: "tool_result", ToolUseID: toolResult.CallID, Content: content, IsError: toolResult.IsError})
 			}
 			appendMessage("user", blocks)
 		default:

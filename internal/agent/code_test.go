@@ -57,7 +57,7 @@ func speakerIndex(t *testing.T) *docs.CodeIndex {
 func TestSearchCodeGivesTheDeclarationsWithTheirFileAndLines(t *testing.T) {
 	shelf := &codeShelfOf{index: speakerIndex(t)}
 	call := func(arguments string) llm.ToolResult {
-		result, err := searchCode(context.Background(), Codes{Shelf: shelf}, nil, llm.ToolCall{ID: "1", Name: SearchCodeToolName, Arguments: json.RawMessage(arguments)})
+		result, err := searchCode(context.Background(), Codes{Shelf: shelf}, nil, llm.ToolCall{ID: "1", Name: SearchCodeToolName, Arguments: json.RawMessage(arguments)}, givenSections{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -112,7 +112,7 @@ func TestSearchDocsTellsToSearchTheCode(t *testing.T) {
 		`{"query":"how many arbitrators"}`: docsReading + " " + docsThenCode,
 		`{"query":"zzz"}`:                  "answer that the documentation does not say. " + docsThenCode,
 	} {
-		result, err := searchDocs(context.Background(), source, nil, llm.ToolCall{ID: "1", Name: SearchDocsToolName, Arguments: json.RawMessage(arguments)}, docsThenCode)
+		result, err := searchDocs(context.Background(), source, nil, llm.ToolCall{ID: "1", Name: SearchDocsToolName, Arguments: json.RawMessage(arguments)}, docsThenCode, givenSections{})
 		if err != nil || !strings.HasSuffix(toolText(t, result), want) {
 			t.Errorf("%s: %q", arguments, toolText(t, result))
 		}
@@ -292,7 +292,7 @@ func TestCodesSearchTheVersionOfTheClusterByDefault(t *testing.T) {
 	}
 	// A failed read of the version ends the turn.
 	failing := Codes{Shelf: shelf, Default: func(context.Context, MCPSession) (string, error) { return "", errors.New("transport down") }}
-	if _, err := searchCode(context.Background(), failing, nil, llm.ToolCall{ID: "1", Name: SearchCodeToolName, Arguments: json.RawMessage(`{"query":"speaker"}`)}); err == nil {
+	if _, err := searchCode(context.Background(), failing, nil, llm.ToolCall{ID: "1", Name: SearchCodeToolName, Arguments: json.RawMessage(`{"query":"speaker"}`)}, givenSections{}); err == nil {
 		t.Error("a failed read of the version did not fail the search")
 	}
 }

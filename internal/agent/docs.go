@@ -169,7 +169,7 @@ func docsTool(source DocsSource) llm.Tool {
 // empty, such as where to search what the sections do not say. A refused
 // search is a tool error for the model; an error of the source, such as a
 // failed MCP transport, fails the turn.
-func searchDocs(ctx context.Context, source DocsSource, session MCPSession, call llm.ToolCall, next string) (llm.ToolResult, error) {
+func searchDocs(ctx context.Context, source DocsSource, session MCPSession, call llm.ToolCall, next string, given givenSections) (llm.ToolResult, error) {
 	fail := func(message string) (llm.ToolResult, error) {
 		return llm.ToolResult{CallID: call.ID, Content: textToolResult(message), IsError: true}, nil
 	}
@@ -183,6 +183,9 @@ func searchDocs(ctx context.Context, source DocsSource, session MCPSession, call
 	}
 	if arguments.Limit == 0 {
 		arguments.Limit = defaultDocsResults
+	}
+	if given == nil {
+		given = givenSections{}
 	}
 	library, choice, err := source.Docs(ctx, session, strings.TrimSpace(arguments.Version))
 	if err != nil {
@@ -203,12 +206,18 @@ func searchDocs(ctx context.Context, source DocsSource, session MCPSession, call
 	if choice != "" {
 		text.WriteString(" " + choice)
 	}
+	sourceLine := text.String()
 	text.WriteString("\n\n")
 	for i, section := range sections {
 		if i > 0 {
-			text.WriteString("\n\n---\n\n")
+			text.WriteString(sectionSeparator)
 		}
-		fmt.Fprintf(&text, "Section: %s\nPage: %s\n\n%s", section.Title, section.Page, section.Text)
+		heading := fmt.Sprintf("Section: %s\nPage: %s", section.Title, section.Page)
+		body := section.Text
+		if !given.give(sourceLine, heading, body) {
+			body = alreadyGiven
+		}
+		fmt.Fprintf(&text, "%s\n\n%s", heading, body)
 	}
 	text.WriteString("\n\n---\n\n" + docsReading)
 	if next != "" {

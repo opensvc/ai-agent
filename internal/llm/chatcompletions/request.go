@@ -93,11 +93,15 @@ func newCreateRequest(model string, maxOutputTokens int, omitStore bool, request
 			wire.Messages = append(wire.Messages, assistant)
 		case llm.RoleTool:
 			for _, result := range neutralMessage.ToolResults {
-				output, err := json.Marshal(toolOutput{Content: result.Content, IsError: result.IsError})
-				if err != nil {
-					return createRequest{}, fmt.Errorf("encode tool result %q: %w", result.CallID, err)
+				// A result of text alone goes as it is.
+				content, plain := result.PlainText()
+				if !plain {
+					output, err := json.Marshal(toolOutput{Content: result.Content, IsError: result.IsError})
+					if err != nil {
+						return createRequest{}, fmt.Errorf("encode tool result %q: %w", result.CallID, err)
+					}
+					content = string(output)
 				}
-				content := string(output)
 				wire.Messages = append(wire.Messages, message{Role: string(neutralMessage.Role), Content: &content, ToolCallID: result.CallID})
 			}
 		}

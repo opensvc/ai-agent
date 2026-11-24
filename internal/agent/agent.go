@@ -342,6 +342,10 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 	// user resumes without it.
 	var pendingReasoning *llm.Reasoning
 
+	// given are the sections of the documentation and the code the turn
+	// already returned, which a search returning them again only names.
+	given := turnGivenSections(state)
+
 	// executeCalls runs the calls of the current iteration left to run, and
 	// reports whether one waits for a confirmation.
 	executeCalls := func() (bool, error) {
@@ -433,7 +437,7 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 				if a.config.Code != nil {
 					next = docsThenCode
 				}
-				docsResult, err := searchDocs(ctx, a.config.Docs, audited, call, next)
+				docsResult, err := searchDocs(ctx, a.config.Docs, audited, call, next, given)
 				if err != nil {
 					return false, fmt.Errorf("search the documentation: %w", err)
 				}
@@ -454,7 +458,7 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 					// searched by default, is audited.
 					audited := &auditedSession{MCPSession: session, emit: emit, iteration: state.Iteration, purpose: "code_version", listed: selection.catalog}
 					var err error
-					if codeResult, err = searchCode(ctx, a.config.Code, audited, call); err != nil {
+					if codeResult, err = searchCode(ctx, a.config.Code, audited, call, given); err != nil {
 						return false, fmt.Errorf("search the code: %w", err)
 					}
 				}

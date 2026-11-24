@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -433,7 +434,7 @@ func (s *toolSelection) run(call llm.ToolCall, titles map[string]string) llm.Too
 			}
 			matches := []searchMatch{match}
 			response := searchReply{Tools: matches, Next: s.next(matches), Hint: hint}
-			text, _ := json.Marshal(response)
+			text, _ := marshalText(response)
 			return llm.ToolResult{CallID: call.ID, Content: textToolResult(string(text))}
 		}
 	}
@@ -492,7 +493,7 @@ func (s *toolSelection) run(call llm.ToolCall, titles map[string]string) llm.Too
 		hints = append(hints, "The tools with reason "+notShownBudget+" cannot be shown: their definitions exceed the size of a model request. Answer with the tools shown.")
 	}
 	response.Hint = strings.Join(hints, " ")
-	text, _ := json.Marshal(response)
+	text, _ := marshalText(response)
 	return llm.ToolResult{CallID: call.ID, Content: textToolResult(string(text))}
 }
 
@@ -561,6 +562,21 @@ func summary(description string) string {
 }
 
 // textToolResult is a tool result holding one text, as MCP returns it.
+// marshalText encodes a reply of search_tools without escaping <, > and &
+// as \u003c, \u003e and \u0026, as json.Marshal does for HTML: the reply is
+// the text of a result, which the model reads as it is. The envelope of a
+// result keeps json.Marshal, so that its bytes are the same before and after
+// the store, which encodes it so.
+func marshalText(value any) ([]byte, error) {
+	var buffer bytes.Buffer
+	encoder := json.NewEncoder(&buffer)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(value); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(buffer.Bytes(), []byte("\n")), nil
+}
+
 func textToolResult(text string) json.RawMessage {
 	data, _ := json.Marshal(map[string]any{"content": []map[string]string{{"type": "text", "text": text}}})
 	return data

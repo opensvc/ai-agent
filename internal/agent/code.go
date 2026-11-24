@@ -128,7 +128,7 @@ func codeTool(source CodeSource) llm.Tool {
 // the version asked, else of the one by default, each with its file and lines.
 // A refused search is a tool error for the model; an error of the source,
 // such as a failed MCP transport, ends the turn.
-func searchCode(ctx context.Context, source CodeSource, session MCPSession, call llm.ToolCall) (llm.ToolResult, error) {
+func searchCode(ctx context.Context, source CodeSource, session MCPSession, call llm.ToolCall, given givenSections) (llm.ToolResult, error) {
 	fail := func(message string) (llm.ToolResult, error) {
 		return llm.ToolResult{CallID: call.ID, Content: textToolResult(message), IsError: true}, nil
 	}
@@ -142,6 +142,9 @@ func searchCode(ctx context.Context, source CodeSource, session MCPSession, call
 	}
 	if arguments.Limit == 0 {
 		arguments.Limit = defaultDocsResults
+	}
+	if given == nil {
+		given = givenSections{}
 	}
 	index, note, err := source.Code(ctx, session, strings.TrimSpace(arguments.Version))
 	if err != nil {
@@ -162,12 +165,18 @@ func searchCode(ctx context.Context, source CodeSource, session MCPSession, call
 	if note != "" {
 		text.WriteString(" " + note)
 	}
+	sourceLine := text.String()
 	text.WriteString("\n\n")
 	for i, result := range results {
 		if i > 0 {
-			text.WriteString("\n\n---\n\n")
+			text.WriteString(sectionSeparator)
 		}
-		fmt.Fprintf(&text, "File: %s:%d-%d\n\n```go\n%s\n```", result.Path, result.Start, result.End, strings.TrimRight(result.Text, "\n"))
+		heading := fmt.Sprintf("File: %s:%d-%d", result.Path, result.Start, result.End)
+		if code := strings.TrimRight(result.Text, "\n"); given.give(sourceLine, heading, code) {
+			fmt.Fprintf(&text, "%s\n\n```go\n%s\n```", heading, code)
+		} else {
+			fmt.Fprintf(&text, "%s\n\n%s", heading, alreadyGiven)
+		}
 	}
 	text.WriteString("\n\n---\n\n" + codeReading)
 	return llm.ToolResult{CallID: call.ID, Content: textToolResult(text.String())}, nil
