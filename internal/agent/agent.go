@@ -253,7 +253,15 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 		toolsByName[tool.Name] = tool
 		titles[tool.Name] = toolTitle(tool)
 	}
-	selection, err := a.selectTools(offeredTools, tools, result.MCP.ToolsSHA256, history, state)
+	// The index of the search is the one of the tools offered: an unattended
+	// turn, offered the read-only tools only, has its own. Indexed by the
+	// whole catalog, the index of an unattended run of the collector hid the
+	// actions from the next turns of its users, until a restart.
+	offeredHash, err := toolCatalogHash(offeredTools)
+	if err != nil {
+		return result, err
+	}
+	selection, err := a.selectTools(offeredTools, tools, offeredHash, history, state)
 	if err != nil {
 		return result, err
 	}
