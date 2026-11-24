@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math/rand/v2"
 	"reflect"
 	"slices"
 	"strings"
@@ -102,7 +103,7 @@ func TestCompactHistoryCompactsAStructuredResult(t *testing.T) {
 		t.Fatalf("compacted result holds %d bytes", len(result.Content))
 	}
 	structured, marker := decodeCompacted(t, result.Content)
-	if marker.Policy != "v2" || !marker.Partial || marker.OriginalBytes != len(original) {
+	if marker.Policy != "v3" || !marker.Partial || marker.OriginalBytes != len(original) {
 		t.Fatalf("marker = %+v", marker)
 	}
 	// The scalars, the count as the tool returned it, and the nested
@@ -228,7 +229,7 @@ func TestPrepareHistoryDescribesTheHistorySent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stats.Policy != "v2" || stats.MaxResultBytes != 2<<10 || stats.MaxHistoryResultBytes != 16<<10 || stats.CompactedResults != 2 ||
+	if stats.Policy != "v3" || stats.MaxResultBytes != 2<<10 || stats.MaxHistoryResultBytes != 16<<10 || stats.CompactedResults != 2 ||
 		stats.LoadedBytes != historySize(history) || stats.CompactedBytes >= stats.LoadedBytes || stats.SentBytes != historySize(sent) || stats.RemovedTurns != 0 {
 		t.Fatalf("stats = %+v", stats)
 	}
@@ -561,18 +562,22 @@ func TestCompactHistoryReducesTextResultsBeforeLeavingATurnOut(t *testing.T) {
 	if total := resultBytes(compacted); total > DefaultHistoryCompaction.MaxHistoryResultBytes {
 		t.Fatalf("results hold %d bytes", total)
 	}
-	// The oldest texts are reduced first, to a marker of their contents.
-	_, marker := decodeCompacted(t, compacted[6].ToolResults[0].Content)
-	if marker.Policy != HistoryCompactionPolicy || marker.OriginalBytes != len(textResult(10000)) || len(marker.Omissions) != 1 ||
+	// The largest texts of the turn are reduced first, to a marker of their
+	// contents: the smallest, which then fits, stays whole.
+	_, marker := decodeCompacted(t, compacted[6].ToolResults[1].Content)
+	if marker.Policy != HistoryCompactionPolicy || marker.OriginalBytes != len(textResult(17000)) || len(marker.Omissions) != 1 ||
 		marker.Omissions[0] != (omission{Path: "/content", Kind: omittedArrayTail, Omitted: 1}) {
 		t.Fatalf("text marker = %+v", marker)
 	}
-	if !json.Valid(compacted[6].ToolResults[0].Content) || len(indexes) != stats.CompactedResults {
+	if !markerAlone(compacted[6].ToolResults[2].Content) || string(compacted[6].ToolResults[0].Content) != string(textResult(10000)) {
+		t.Fatal("the texts were not reduced the largest first")
+	}
+	if !json.Valid(compacted[6].ToolResults[1].Content) || len(indexes) != stats.CompactedResults {
 		t.Fatalf("indexes %v, stats %+v", indexes, stats)
 	}
-	// The room the texts free goes back to the structured result.
+	// The turn before, which fits beside the turn reduced, is kept.
 	if value, _ := decodeCompacted(t, compacted[2].ToolResults[0].Content); value["disks"] == nil {
-		t.Fatalf("the structured result stayed a marker: %s", compacted[2].ToolResults[0].Content)
+		t.Fatalf("the structured result of the turn before was reduced: %s", compacted[2].ToolResults[0].Content)
 	}
 	// Calls and arguments stay: the model knows what it searched.
 	if !reflect.DeepEqual(compacted[5].ToolCalls, history[5].ToolCalls) {
@@ -581,7 +586,7 @@ func TestCompactHistoryReducesTextResultsBeforeLeavingATurnOut(t *testing.T) {
 }
 
 func TestCompactHistoryKeepsATextThatFits(t *testing.T) {
-	// The structured results are reduced first: a text that then fits
+	// Results under the budget are compacted on their own only: a text
 	// stays whole.
 	var results []llm.ToolResult
 	for i := range 6 {
@@ -634,10 +639,10 @@ func TestCompactHistoryKeepsTheTurnsBeforeALastTurnOverTheBudget(t *testing.T) {
 	}
 }
 
-func TestCompactHistoryRestoresTheStructuredResultsAMarkerFrees(t *testing.T) {
-	// A text over the budget alone is reduced to a marker; the structured
-	// results of the last turn are then compacted to their budget, not to a
-	// marker.
+func TestCompactHistoryKeepsTheLastTurnWhenATurnBeforeIsReduced(t *testing.T) {
+	// A text of a turn before, over the budget alone, is reduced to a
+	// marker; the structured results of the last turn are compacted to
+	// their own budget, not to a marker.
 	docs := named(turnWith("docs", llm.ToolResult{CallID: "d", Content: textResult(17000)}), "search_docs")
 	var results []llm.ToolResult
 	for i := range 3 {
@@ -709,5 +714,302 @@ func TestTextMarkerTakesTextsAlone(t *testing.T) {
 	mcp := json.RawMessage(`{"content":[{"type":"text","text":"` + strings.Repeat("d", 4000) + `"}],"isError":false}`)
 	if content, ok := policy.textMarker(mcp); !ok || !json.Valid(content) || len(content) >= len(mcp) {
 		t.Fatalf("the MCP text result was not reduced: %s", content)
+	}
+}
+
+// historyTurns builds a conversation of turns of the given results, and
+// gives where each turn begins.
+func historyTurns(turns [][]llm.ToolResult, names func(turn int) string) ([]llm.Message, []int) {
+	var history []llm.Message
+	var starts []int
+	for turn, results := range turns {
+		starts = append(starts, len(history))
+		history = append(history, named(turnWith(fmt.Sprintf("question %d", turn), results...), names(turn))...)
+	}
+	return history, starts
+}
+
+// sameOrMarker checks that each result of the first end messages, the turns
+// of before, is, in after, the same, or became a marker: the history a turn
+// sends begins as the one the turn before sent, but where a result is
+// reduced, and a reduced result is never given back. It gives the results
+// reduced.
+func sameOrMarker(t *testing.T, before, after []llm.Message, end int) (changed int) {
+	t.Helper()
+	for i := 0; i < end; i++ {
+		for j, result := range before[i].ToolResults {
+			now := after[i].ToolResults[j].Content
+			if string(now) == string(result.Content) {
+				continue
+			}
+			if markerAlone(result.Content) || !markerAlone(now) {
+				t.Fatalf("message %d result %d changed otherwise than to a marker:\n%s\n%s", i, j, result.Content, now)
+			}
+			changed++
+		}
+	}
+	return changed
+}
+
+// markerAlone tells a result reduced to a marker alone: no content, no
+// structured content, its omissions only.
+func markerAlone(raw json.RawMessage) bool {
+	var envelope map[string]json.RawMessage
+	if json.Unmarshal(raw, &envelope) != nil {
+		return false
+	}
+	_, marked := envelope["_history_compaction"]
+	_, structured := envelope["structuredContent"]
+	return marked && !structured && string(envelope["content"]) == "[]"
+}
+
+// A turn and the next compact the history they share the same way, but for
+// results reduced to a marker, never given back: the history a turn sends
+// begins as the one the turn before sent, which a provider reads from its
+// cache. Checked on conversations of structured results, texts, searches,
+// errors and turns without result.
+func TestCompactHistoryKeepsTheHistoryOfTheTurnsBefore(t *testing.T) {
+	image := json.RawMessage(`{"content":[{"type":"image","data":"` + strings.Repeat("A", 3000) + `","mimeType":"image/png"}]}`)
+	rng := rand.New(rand.NewPCG(7, 11))
+	pairs, changed := 0, 0
+	for range 60 {
+		var history []llm.Message
+		var starts []int
+		for turn := range 3 + rng.IntN(10) {
+			starts = append(starts, len(history))
+			var calls []llm.ToolCall
+			var results []llm.ToolResult
+			for i := range rng.IntN(4) {
+				id := fmt.Sprintf("t%d-%d", turn, i)
+				name := "list_node_disks"
+				var result llm.ToolResult
+				switch rng.IntN(7) {
+				case 0:
+					result = llm.ToolResult{CallID: id, Content: textResult(500 + rng.IntN(20000))}
+				case 1:
+					result = llm.ToolResult{CallID: id, IsError: true, Content: textResult(300)}
+				case 2:
+					result = llm.ToolResult{CallID: id, Content: image}
+				case 3:
+					name, result = agent.SearchToolName, llm.ToolResult{CallID: id, Content: textResult(500 + rng.IntN(4000))}
+				default:
+					result = llm.ToolResult{CallID: id, Content: structuredResult(t, disks(1+rng.IntN(30)), true)}
+				}
+				calls = append(calls, llm.ToolCall{ID: id, Name: name, Arguments: json.RawMessage(`{}`)})
+				results = append(results, result)
+			}
+			history = append(history, llm.Message{Role: llm.RoleUser, Text: fmt.Sprint("question ", turn)})
+			if len(calls) > 0 {
+				history = append(history, llm.Message{Role: llm.RoleAssistant, ToolCalls: calls}, llm.Message{Role: llm.RoleTool, ToolResults: results})
+			}
+			history = append(history, llm.Message{Role: llm.RoleAssistant, Text: "answer"})
+		}
+		for n := 2; n < len(starts); n++ {
+			before, statsBefore, _ := compactHistory(history[:starts[n-1]], HistoryCompaction{})
+			after, statsAfter, _ := compactHistory(history[:starts[n]], HistoryCompaction{})
+			if statsBefore.RemovedTurns != statsAfter.RemovedTurns {
+				continue // a turn left out starts again from the originals
+			}
+			// Both begin at the first turn kept.
+			changed += sameOrMarker(t, before, after, starts[n-1]-starts[statsAfter.RemovedTurns])
+			pairs++
+		}
+	}
+	if pairs == 0 || changed == 0 {
+		t.Fatalf("%d pairs of turns checked, %d results reduced: the property checked nothing", pairs, changed)
+	}
+}
+
+// After a turn brings the results over the budget, the turns before hold at
+// most half of it, though the turn would leave them more: the next turns,
+// while they fit, change nothing of the history before them.
+func TestCompactHistoryLeavesRoomForTheNextTurns(t *testing.T) {
+	var turns [][]llm.ToolResult
+	for turn := range 5 {
+		turns = append(turns, []llm.ToolResult{{CallID: fmt.Sprint("t", turn), Content: textResult(3000)}})
+	}
+	turns = append(turns, []llm.ToolResult{{CallID: "over", Content: textResult(2000)}}, []llm.ToolResult{{CallID: "next", Content: textResult(2000)}})
+	history, starts := historyTurns(turns, func(int) string { return "search_docs" })
+	// Five turns of 3 KB and one of 2 KB exceed the budget: the turns before
+	// go down to half of it, not to the 14 KB the turn would leave them.
+	reduced, _, _ := compactHistory(history[:starts[6]], HistoryCompaction{})
+	markers := 0
+	for _, message := range reduced[:starts[5]] {
+		for _, result := range message.ToolResults {
+			if markerAlone(result.Content) {
+				markers++
+			}
+		}
+	}
+	if before := resultBytes(reduced[:starts[5]]); markers == 0 || before > DefaultHistoryCompaction.MaxHistoryResultBytes/2 {
+		t.Fatalf("the turns before hold %d bytes, %d markers", before, markers)
+	}
+	// The next turn fits: nothing before it changes.
+	next, _, _ := compactHistory(history, HistoryCompaction{})
+	if changed := sameOrMarker(t, reduced, next, starts[6]); changed != 0 {
+		t.Fatalf("%d results of the turns before changed", changed)
+	}
+}
+
+// A search the agent reads back is never compacted, even structured.
+func TestCompactHistoryKeepsAStructuredSearchWhole(t *testing.T) {
+	search := llm.ToolResult{CallID: "s", Content: structuredResult(t, disks(40), true)}
+	if len(search.Content) <= DefaultHistoryCompaction.MaxResultBytes {
+		t.Fatalf("the search holds %d bytes only", len(search.Content))
+	}
+	history, _ := historyTurns([][]llm.ToolResult{{search}}, func(int) string { return agent.SearchToolName })
+	compacted, _, _ := compactHistory(history, HistoryCompaction{})
+	if string(compacted[2].ToolResults[0].Content) != string(search.Content) {
+		t.Fatal("the search was compacted")
+	}
+}
+
+// A large turn keeps of the turns before what fits beside it, not half the
+// budget minus itself: three turns of two texts of 1.5 KiB, then a search
+// of the documentation of 8.2 KiB, keep five texts of six.
+func TestCompactHistoryKeepsTheTurnsBeforeThatFitBesideALargeTurn(t *testing.T) {
+	var turns [][]llm.ToolResult
+	for turn := range 3 {
+		turns = append(turns, []llm.ToolResult{{CallID: fmt.Sprint(turn, "a"), Content: textResult(1500)}, {CallID: fmt.Sprint(turn, "b"), Content: textResult(1500)}})
+	}
+	turns = append(turns, []llm.ToolResult{{CallID: "doc", Content: textResult(8200)}})
+	history, starts := historyTurns(turns, func(int) string { return "search_docs" })
+	compacted, _, _ := compactHistory(history, HistoryCompaction{})
+	whole := 0
+	for _, message := range compacted[:starts[3]] {
+		for _, result := range message.ToolResults {
+			if string(result.Content) == string(textResult(1500)) {
+				whole++
+			}
+		}
+	}
+	if whole != 5 || resultBytes(compacted) > DefaultHistoryCompaction.MaxHistoryResultBytes {
+		t.Fatalf("%d texts of the turns before kept whole, %d bytes", whole, resultBytes(compacted))
+	}
+	if string(compacted[len(compacted)-2].ToolResults[0].Content) != string(textResult(8200)) {
+		t.Fatal("the search of the last turn was reduced")
+	}
+}
+
+// The searches of the last turn that searched stay whole; those of a turn
+// before it are reduced as any text, and a refused search does not take
+// their place.
+func TestCompactHistoryReducesTheSearchesOfATurnBeforeTheLastSearch(t *testing.T) {
+	search := func(id string) llm.ToolResult { return llm.ToolResult{CallID: id, Content: textResult(3000)} }
+	turns := [][]llm.ToolResult{{search("s0")}, {search("s1")}, {{CallID: "refused", IsError: true, Content: textResult(200)}}}
+	for turn := range 6 {
+		turns = append(turns, []llm.ToolResult{{CallID: fmt.Sprint("d", turn), Content: structuredResult(t, disks(24), true)}, {CallID: fmt.Sprint("x", turn), Content: textResult(2500)}})
+	}
+	history, starts := historyTurns(turns, func(turn int) string {
+		if turn < 3 {
+			return agent.SearchToolName
+		}
+		return "list_node_disks"
+	})
+	compacted, stats, _ := compactHistory(history, HistoryCompaction{})
+	if stats.RemovedTurns != 0 {
+		t.Fatalf("%+v", stats)
+	}
+	if !markerAlone(compacted[starts[0]+2].ToolResults[0].Content) {
+		t.Fatal("the search of a turn before the last search stayed whole")
+	}
+	if string(compacted[starts[1]+2].ToolResults[0].Content) != string(search("s1").Content) {
+		t.Fatal("the last valid search was reduced")
+	}
+}
+
+// A turn over the budget alone is reduced, the largest first, before the
+// turns before it: they are kept while they fit beside it, and its small
+// results stay whole.
+func TestCompactHistoryReducesALargeTurnBeforeTheTurnsBefore(t *testing.T) {
+	var turns [][]llm.ToolResult
+	for turn := range 3 {
+		turns = append(turns, []llm.ToolResult{{CallID: fmt.Sprint(turn, "a"), Content: textResult(1500)}, {CallID: fmt.Sprint(turn, "b"), Content: textResult(1500)}})
+	}
+	last := []llm.ToolResult{{CallID: "s", Content: structuredResult(t, disks(24), true)}, {CallID: "x", Content: textResult(1500)}, {CallID: "doc", Content: textResult(17000)}}
+	turns = append(turns, last)
+	history, starts := historyTurns(turns, func(int) string { return "search_docs" })
+	compacted, stats, _ := compactHistory(history, HistoryCompaction{})
+	if stats.RemovedTurns != 0 {
+		t.Fatalf("%+v", stats)
+	}
+	for _, message := range compacted[:starts[3]] {
+		for _, result := range message.ToolResults {
+			if string(result.Content) != string(textResult(1500)) {
+				t.Fatalf("a result of the turns before was reduced: %s", result.Content)
+			}
+		}
+	}
+	results := compacted[len(compacted)-2].ToolResults
+	if value, _ := decodeCompacted(t, results[0].Content); value["disks"] == nil || string(results[1].Content) != string(textResult(1500)) || !markerAlone(results[2].Content) {
+		t.Fatalf("the last turn was not reduced the largest first: %d, %d, %d bytes", len(results[0].Content), len(results[1].Content), len(results[2].Content))
+	}
+}
+
+// A large result of a turn before is reduced before the older ones, which
+// it would leave without room for nothing: the next turn keeps the texts
+// the turn of the large result kept.
+func TestCompactHistoryReducesALargeResultOfATurnBeforeFirst(t *testing.T) {
+	for _, size := range []int{8500, 10000, 12000, 15000} {
+		var turns [][]llm.ToolResult
+		for turn := range 3 {
+			turns = append(turns, []llm.ToolResult{{CallID: fmt.Sprint(turn, "a"), Content: textResult(1500)}, {CallID: fmt.Sprint(turn, "b"), Content: textResult(1500)}})
+		}
+		turns = append(turns, []llm.ToolResult{{CallID: "doc", Content: textResult(size)}}, []llm.ToolResult{{CallID: "next", Content: textResult(2000)}})
+		history, starts := historyTurns(turns, func(int) string { return "search_docs" })
+		whole := func(messages []llm.Message) int {
+			count := 0
+			for _, message := range messages[:starts[3]] {
+				for _, result := range message.ToolResults {
+					if string(result.Content) == string(textResult(1500)) {
+						count++
+					}
+				}
+			}
+			return count
+		}
+		atDoc, _, _ := compactHistory(history[:starts[4]], HistoryCompaction{})
+		next, _, _ := compactHistory(history, HistoryCompaction{})
+		// At its own turn, the doc leaves the turns before what fits beside
+		// it, possibly nothing; the next turn takes nothing more from them.
+		if whole(next) != whole(atDoc) || (size < 15000 && whole(next) == 0) || !markerAlone(next[starts[3]+2].ToolResults[0].Content) {
+			t.Fatalf("doc of %d bytes: %d texts kept at its turn, %d at the next", size, whole(atDoc), whole(next))
+		}
+	}
+}
+
+// Of results of equal sizes, the first is reduced first.
+func TestCompactHistoryReducesTheFirstOfEqualResults(t *testing.T) {
+	history, _ := historyTurns([][]llm.ToolResult{{{CallID: "a", Content: textResult(9000)}, {CallID: "b", Content: textResult(9000)}}}, func(int) string { return "search_docs" })
+	compacted, _, _ := compactHistory(history, HistoryCompaction{})
+	if !markerAlone(compacted[2].ToolResults[0].Content) || string(compacted[2].ToolResults[1].Content) != string(textResult(9000)) {
+		t.Fatal("the second of equal results was reduced")
+	}
+}
+
+// A result smaller than its marker is never replaced by it.
+func TestCompactHistoryNeverReplacesAResultByALargerMarker(t *testing.T) {
+	small := json.RawMessage(`{"content":[{"type":"text","text":"ok"}]}`)
+	turns := [][]llm.ToolResult{{{CallID: "small", Content: small}}}
+	for turn := range 6 {
+		turns = append(turns, []llm.ToolResult{{CallID: fmt.Sprint("t", turn), Content: textResult(3000)}})
+	}
+	history, _ := historyTurns(turns, func(int) string { return "search_docs" })
+	compacted, _, _ := compactHistory(history, HistoryCompaction{})
+	if string(compacted[2].ToolResults[0].Content) != string(small) {
+		t.Fatalf("the small result became %s", compacted[2].ToolResults[0].Content)
+	}
+}
+
+// When the turns before cannot make room, holding errors, the turn itself is
+// reduced to what they leave it.
+func TestCompactHistoryReducesTheTurnWhenTheTurnsBeforeCannotMakeRoom(t *testing.T) {
+	failed := llm.ToolResult{CallID: "e", IsError: true, Content: textResult(10000)}
+	history, _ := historyTurns([][]llm.ToolResult{{failed}, {{CallID: "a", Content: textResult(4000)}, {CallID: "b", Content: textResult(4000)}}}, func(int) string { return "search_docs" })
+	compacted, stats, _ := compactHistory(history, HistoryCompaction{})
+	results := compacted[6].ToolResults
+	if stats.RemovedTurns != 0 || string(compacted[2].ToolResults[0].Content) != string(failed.Content) ||
+		!markerAlone(results[0].Content) || string(results[1].Content) != string(textResult(4000)) {
+		t.Fatalf("%+v: the turn was not reduced to what the error leaves it", stats)
 	}
 }
