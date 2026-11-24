@@ -83,6 +83,36 @@ type ToolResult struct {
 	IsError bool
 }
 
+// PlainText gives the text of a result made of one text content alone,
+// without error, structured content or any other field, but an isError
+// false: an adapter sends it as it is, rather than in its JSON envelope,
+// whose escapes of line breaks and quotes cost tokens and bury code and
+// documentation. It reports false for any other result.
+func (r ToolResult) PlainText() (string, bool) {
+	if r.IsError {
+		return "", false
+	}
+	var envelope map[string]json.RawMessage
+	if json.Unmarshal(r.Content, &envelope) != nil {
+		return "", false
+	}
+	for key, value := range envelope {
+		if key != "content" && (key != "isError" || string(value) != "false") {
+			return "", false
+		}
+	}
+	var contents []map[string]json.RawMessage
+	if json.Unmarshal(envelope["content"], &contents) != nil || len(contents) != 1 || len(contents[0]) != 2 || string(contents[0]["type"]) != `"text"` {
+		return "", false
+	}
+	// An empty text keeps its envelope: no result was ever sent empty.
+	var text string
+	if json.Unmarshal(contents[0]["text"], &text) != nil || text == "" {
+		return "", false
+	}
+	return text, true
+}
+
 type EventType string
 
 const (

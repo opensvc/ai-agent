@@ -98,11 +98,16 @@ func buildCreateRequest(model string, maxOutputTokens int, request llm.Request, 
 			}
 		case llm.RoleTool:
 			for _, result := range message.ToolResults {
-				output, err := json.Marshal(toolOutput{Content: result.Content, IsError: result.IsError})
-				if err != nil {
-					return createRequest{}, fmt.Errorf("encode tool result %q: %w", result.CallID, err)
+				// A result of text alone goes as it is.
+				text, plain := result.PlainText()
+				if !plain {
+					output, err := json.Marshal(toolOutput{Content: result.Content, IsError: result.IsError})
+					if err != nil {
+						return createRequest{}, fmt.Errorf("encode tool result %q: %w", result.CallID, err)
+					}
+					text = string(output)
 				}
-				wire.Input = append(wire.Input, functionOutputInput{Type: "function_call_output", CallID: result.CallID, Output: string(output)})
+				wire.Input = append(wire.Input, functionOutputInput{Type: "function_call_output", CallID: result.CallID, Output: text})
 			}
 		}
 	}

@@ -316,7 +316,7 @@ in milliseconds:
 | a client out of phase | `MESSAGES_SNAPSHOT` after `RUN_STARTED`; see below |
 | text of one model answer | `TEXT_MESSAGE_START` (`messageId` `<turn ID>:<2 × iteration>`, the ID the turn stores the answer with, role `assistant`), `TEXT_MESSAGE_CONTENT`, `TEXT_MESSAGE_END` before a tool call or the end |
 | tool call, of the MCP or of the agent | `TOOL_CALL_START` (`toolCallId`, `toolCallName`, `parentMessageId` the message of its answer), `TOOL_CALL_ARGS` with the JSON arguments whole, `TOOL_CALL_END` |
-| tool result | `TOOL_CALL_RESULT` with the JSON result the model read, `{"content", "structuredContent", "isError"}`, `isError` `true` for a refusal of the MCP tool and `false` otherwise, or a note of its size beyond 64 KiB |
+| tool result | `TOOL_CALL_RESULT` with the JSON result, `{"content", "structuredContent", "isError"}`, `isError` `true` for a refusal of the MCP tool and `false` otherwise, or a note of its size beyond 64 KiB; see [Tool results](#tool-results) for what the model reads of it |
 | completion | `RUN_FINISHED`, `outcome` `{"type":"success"}`, `result` `{"turnId": …}` for the feedback |
 | confirmation | the call as a tool call, then `RUN_FINISHED`, `outcome` `interrupt` |
 | failure | `RUN_ERROR` with a `code`, `request_timeout`, `tool_name_conflict`, `conversation_quota` or `conversation_limit` (the turn could not be stored, see Quotas) or `agent_failed`, and a `message` for the developer |
@@ -696,8 +696,11 @@ sections of level 2 where it can be, each opening on the headings it is
 under. The result names the book, its build and the agent release of its
 keyword reference, which release line it is the book of and why, and ends on
 how to read it: the sections describe OpenSVC, not the cluster, and a value
-of an example is no default. A refused search is a tool error for the model,
-not a failed turn. The name is the agent's: an MCP tool named `search_docs`
+of an example is no default. A section the turn already returned in full,
+of the same book, under the same heading and with the same text, is given
+again as its heading and a note saying so, which tells to search again when
+it is no longer above, as after the history compaction of a later turn. A
+refused search is a tool error for the model, not a failed turn. The name is the agent's: an MCP tool named `search_docs`
 fails the turn. Without a book, the tool and its prompt are left out.
 
 The book is published by release line, as its `versions.json` lists them
@@ -773,7 +776,8 @@ tests are left out. Each declaration is indexed with its doc comment, the
 words of its identifiers searched, and a search gives, as `search_docs`
 does, the file of the declarations found when it is short, else the run of
 its declarations, up to 6 KiB, holding them, with its path and lines, 16 KiB
-in all. A search takes English keywords or Go identifiers, an optional
+in all; a run the turn already returned in full is given again as its path,
+lines and a note, as for `search_docs`. A search takes English keywords or Go identifiers, an optional
 `limit` and an optional `version`. The code of a version is read the first
 time a search asks for it, a failed read asked again 10 minutes later;
 three versions are kept or being read, the latest code always among them,
@@ -909,6 +913,20 @@ stored with the tool calls of the turn, so that a feedback shows them, and
 a turn resumed after a confirmation sees the tools it found.
 
 
+
+## Tool results
+
+The agent keeps each tool result as JSON, `{"content", "structuredContent",
+"isError"}`: the history, the stream, the snapshot, the feedback and the
+export give it so. The model reads a result made of one text alone, not
+empty, without error, structured content or any other field but `isError`
+false, such as one of `search_docs`, `search_code` or `search_tools`, as
+that text, without its JSON envelope, whose escapes of line breaks and
+quotes cost tokens and bury code and documentation; any other result, an
+error included, as its JSON, with its error flag where the protocol has
+one. On the protocols without such a flag, Responses and Chat Completions,
+a text alone is thus told from an error or a structured result by its form
+only: a text that would imitate the envelope of an error is read as one.
 
 ## History compaction
 
