@@ -394,8 +394,7 @@ func TestAResumedTurnKeepsSearching(t *testing.T) {
 	agent.config.SearchThreshold = 100
 	var searchResult string
 	model.steps = append(model.steps, func(request llm.Request, emit llm.EmitFunc) error {
-		last := request.Messages[len(request.Messages)-1]
-		searchResult = string(last.ToolResults[1].Content)
+		searchResult = string(lastToolResults(request)[1].Content)
 		return textStep("done")(request, emit)
 	})
 	resumed, err := agent.ResumeTurn(t.Context(), nil, *suspended.Suspended, DecisionApprove, func(Event) error { return nil })
@@ -845,12 +844,13 @@ func TestSearchListsTheToolsAFormerSearchShowedFirst(t *testing.T) {
 	}
 }
 
-// A search of the last turn showing many tools keeps 4 of them, the first,
-// and does not push out a tool called the turn before.
+// A search of the last turn showing more tools than one search may show
+// keeps the first of them, and does not push out a tool called the turn
+// before.
 func TestSearchBoundsTheToolsAFormerSearchShowed(t *testing.T) {
 	catalog := searchCatalog()
 	var matches []searchMatch
-	for i := range 8 {
+	for i := range maxHistoryShownTools + 3 {
 		name := fmt.Sprintf("tool_%d", i)
 		catalog = append(catalog, &mcp.Tool{Name: name, Description: "A tool.", InputSchema: objectSchema(), Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true}})
 		matches = append(matches, searchMatch{Name: name, Shown: true})
@@ -874,7 +874,11 @@ func TestSearchBoundsTheToolsAFormerSearchShowed(t *testing.T) {
 	if _, err := searchAgent(t, model, &fakeSession{tools: catalog}, Config{}).RunTurn(t.Context(), history, "and?", func(Event) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{SearchToolName, "tool_0", "tool_1", "tool_2", "tool_3", "get_cluster_status", "list_node_hardware"}
+	want := []string{SearchToolName}
+	for i := range maxHistoryShownTools {
+		want = append(want, fmt.Sprintf("tool_%d", i))
+	}
+	want = append(want, "get_cluster_status", "list_node_hardware")
 	if !slices.Equal(tools, want) {
 		t.Fatalf("tools = %v, want %v", tools, want)
 	}

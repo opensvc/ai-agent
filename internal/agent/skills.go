@@ -200,10 +200,11 @@ func (s *skillShelf) load(ctx context.Context, session MCPSession, backend strin
 		}
 		shown = append(shown, name)
 	}
-	// The tools are shown in reverse, the first one the skill names ending
-	// first in the list, right after search_tools.
+	// The tools are shown in the order the skill names them, right after
+	// search_tools.
 	if selection.search {
-		for _, name := range slices.Backward(shown) {
+		selection.startBatch()
+		for _, name := range shown {
 			selection.show(name)
 		}
 	}

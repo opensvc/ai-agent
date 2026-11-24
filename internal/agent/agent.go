@@ -310,7 +310,15 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 		return turn
 	}
 	messages := make([]llm.Message, 0, len(history)+len(state.Messages)+3)
-	messages = append(messages, llm.Message{Role: llm.RoleSystem, Text: systemPrompt + "\n" + confirmationState(state, decision)})
+	// The system message is the same for the run that waits on a
+	// confirmation and the run that resumes it, so that a provider reads
+	// the request the turn waited after from its cache: the answer of the
+	// confirmation ends the result of its call, which the turn keeps.
+	messages = append(messages, llm.Message{Role: llm.RoleSystem, Text: systemPrompt + "\n" + noPendingConfirmation})
+	confirmationNote := ""
+	if decision == DecisionApprove || decision == DecisionReject {
+		confirmationNote = confirmationState(state, decision)
+	}
 	messages = append(messages, history...)
 	messages = append(messages, state.Messages...)
 	// The context of the interface goes with the prompt of the turn, in the
@@ -385,7 +393,7 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 				loadResult := skills.load(ctx, session, a.config.Backend, call, selection)
 				// The tools a skill showed stay shown when the turn resumes.
 				if selection.search {
-					state.ActiveTools = slices.Clone(selection.active)
+					state.ActiveTools, state.FoundTools = slices.Clone(selection.active), slices.Clone(selection.found)
 				}
 				if err := emitAgentEvent(emit, Event{Type: EventToolFinished, ToolName: call.Name, ToolError: loadResult.IsError, ToolCallID: call.ID, ToolResult: loadResult.Content, Iteration: state.Iteration}); err != nil {
 					return false, err
@@ -453,7 +461,7 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 					return false, err
 				}
 				searchResult := selection.run(call, titles)
-				state.ActiveTools, state.Searches = slices.Clone(selection.active), selection.searches
+				state.ActiveTools, state.FoundTools, state.Searches = slices.Clone(selection.active), slices.Clone(selection.found), selection.searches
 				if err := emitAgentEvent(emit, Event{Type: EventToolFinished, ToolName: call.Name, ToolError: searchResult.IsError, ToolCallID: call.ID, ToolResult: searchResult.Content, Iteration: state.Iteration}); err != nil {
 					return false, err
 				}
@@ -477,7 +485,8 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 				return false, err
 			}
 			if callDecision == DecisionReject {
-				state.Results = append(state.Results, llm.ToolResult{CallID: call.ID, Content: rejectedToolResult, IsError: true})
+				state.Results = append(state.Results, llm.ToolResult{CallID: call.ID, Content: withResultText(rejectedToolResult, confirmationNote), IsError: true})
+				confirmationNote = ""
 				continue
 			}
 			if unattended && requiresConfirmation(tool) {
@@ -526,6 +535,9 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 			}
 			if edited != nil {
 				content = editedToolResult(content, edited)
+			}
+			if callDecision == DecisionApprove {
+				content, confirmationNote = withResultText(content, confirmationNote), ""
 			}
 			if err := emitAgentEvent(emit, Event{Type: EventToolFinished, ToolName: call.Name, ToolError: toolResult.IsError, ToolCallID: call.ID, ToolResult: content, Iteration: state.Iteration}); err != nil {
 				return false, err

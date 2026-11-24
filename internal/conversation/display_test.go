@@ -25,7 +25,7 @@ func TestDisplayTurnTellsEachCall(t *testing.T) {
 			{CallID: "c2", Content: json.RawMessage(`{"content":[{"type":"text","text":"node n9 is not a node"}],"isError":true}`), IsError: true},
 		}},
 		{Role: llm.RoleAssistant, Text: "I will stop it.", ToolCalls: []llm.ToolCall{call("c3", "stop_instance", `{"path":"web","node":"n1"}`)}},
-		{Role: llm.RoleTool, ToolResults: []llm.ToolResult{{CallID: "c3", Content: json.RawMessage(`{"content":[{"type":"text","text":"` + agent.RejectedToolResultText + `"}]}`), IsError: true}}},
+		{Role: llm.RoleTool, ToolResults: []llm.ToolResult{{CallID: "c3", Content: json.RawMessage(`{"content":[{"type":"text","text":"` + agent.RejectedToolResultText + `"},{"type":"text","text":"The confirmation of stop_object was answered: rejected."}]}`), IsError: true}}},
 		{Role: llm.RoleAssistant, Text: "Not stopped."},
 	}
 	timing := TurnTiming{

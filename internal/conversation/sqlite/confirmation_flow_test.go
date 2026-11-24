@@ -45,8 +45,15 @@ func (s *flowSession) Close() error { return nil }
 type flowModel struct{ lastResult string }
 
 func (m *flowModel) Stream(_ context.Context, request llm.Request, emit llm.EmitFunc) error {
-	last := request.Messages[len(request.Messages)-1]
-	if last.Role == llm.RoleUser {
+	// The answer of a confirmation follows the result of its call: the
+	// last tool message holds it.
+	var last *llm.Message
+	for i := range request.Messages {
+		if request.Messages[i].Role == llm.RoleTool {
+			last = &request.Messages[i]
+		}
+	}
+	if last == nil {
 		if err := emit(llm.Event{Type: llm.EventToolCall, ToolCall: &llm.ToolCall{ID: "call-1", Name: "stop_object", Arguments: json.RawMessage(`{"path":"prod/svc/web"}`)}}); err != nil {
 			return err
 		}

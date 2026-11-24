@@ -294,7 +294,15 @@ up; after the calls, their result and what is left of what the user asked,
 without repeating the text before them, the totals as the tool results
 confirm them. The text of a response streams before its calls, so before
 their confirmation. An approval tells it to finish what the user asked, each
-other call confirmed on its own.
+other call confirmed on its own. The system message says in every run that
+no confirmation is pending; the answer of a confirmation, the call it
+covers, its path and node, and whether it was approved or rejected, ends the
+result of that call, a text after its contents, which the history keeps:
+the system message stays the same, and the request the turn waited after
+begins the one that resumes it, which a provider reads from its cache. A
+model that reasoned before the call resumes without its reasoning, which a
+turn waiting on the user does not keep: its prefix then differs from its
+first answer of the turn on.
 
 Errors before the stream are JSON errors, `{"error": {"code", "message"}}`,
 the codes the OpenAPI description lists. The stream is `text/event-stream`,
@@ -835,10 +843,27 @@ one model request (1 MiB), the model does not see them all. A threshold of
   `_meta`. om3-mcp and oc3-mcp mark their own; the agent holds no list of
   them;
 - the tools called in the recent history of the conversation, at most 8;
+- the tools the searches of the recent turns showed without the model
+  calling them, at most 15, the tools one search may show, in the order the
+  turn listed them;
 - the tools its searches found during the turn. They come right after
-  `search_tools`, the most recent first, then the core tools and those of the
-  history: listed last, after the core tools, the model searched again for a
-  tool it had been shown in half of the replays of a first turn.
+  `search_tools`, the most recent search first, the tools of one search in
+  its order, the best first, then those of the recent searches, the core
+  tools and those of the history: listed last, after the core tools, the
+  model searched again for a tool it had been shown in half of the replays of
+  a first turn.
+
+A turn resumed after a confirmation starts with the tools of the request it
+waited after, in the same order. A turn after one that searched once, and
+showed at most 15 tools, starts with the tools of its last request: a
+provider then reads the prefix of the request, tools, system message and
+history, from its cache, where a change of the tools makes it write the
+whole prefix again. The tools differ, and the next turn writes its prefix
+again, when the turn before searched three times, `search_tools` then being
+no longer listed, showed more than 15 tools, searched twice for tools in
+common, or loaded a skill after a search, and when a tool called in an
+earlier turn is called again, the tools of the history going the most
+recent first.
 
 `search_tools` takes a query and an optional limit (5 by default, 10 at
 most). Its description, the description of its query and the system prompt
