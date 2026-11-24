@@ -134,7 +134,7 @@ type toolSelection struct {
 	scoreRatio float64
 }
 
-// indexCache keeps the index of the last catalog, by its hash.
+// indexCache keeps the index of the last tools offered, by their hash.
 type indexCache struct {
 	mu    sync.Mutex
 	hash  string
@@ -155,7 +155,9 @@ func (c *indexCache) get(hash string, tools []*mcp.Tool) (*toolsearch.Index, err
 	return index, nil
 }
 
-func (a *Agent) selectTools(mcpTools []*mcp.Tool, converted []llm.Tool, catalogHash string, history []llm.Message, state *SuspendedTurn) (*toolSelection, error) {
+// selectTools gives the tools of the model requests of a turn, from the
+// tools offered to it, mcpTools, whose hash, offeredHash, names their index.
+func (a *Agent) selectTools(mcpTools []*mcp.Tool, converted []llm.Tool, offeredHash string, history []llm.Message, state *SuspendedTurn) (*toolSelection, error) {
 	selection := &toolSelection{all: converted, catalog: make(map[string]llm.Tool, len(converted))}
 	catalogBytes := 0
 	for _, tool := range converted {
@@ -176,7 +178,7 @@ func (a *Agent) selectTools(mcpTools []*mcp.Tool, converted []llm.Tool, catalogH
 	if _, exists := selection.catalog[SearchToolName]; exists {
 		return nil, fmt.Errorf("MCP tool %q conflicts with the tool search of the agent", SearchToolName)
 	}
-	index, err := a.indexes.get(catalogHash, mcpTools)
+	index, err := a.indexes.get(offeredHash, mcpTools)
 	if err != nil {
 		return nil, err
 	}

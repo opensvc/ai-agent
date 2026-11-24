@@ -915,3 +915,43 @@ func TestCloseResultsAddsTheResultsCloseToTheBest(t *testing.T) {
 		t.Fatalf("clear: %s", got)
 	}
 }
+
+// An unattended turn, offered the read-only tools only, has its own index:
+// the next turn of a user still finds the actions, and an unattended turn
+// after a user's does not.
+func TestAnUnattendedTurnKeepsItsOwnIndex(t *testing.T) {
+	found := func(request llm.Request) []string {
+		var reply searchReply
+		var content struct {
+			Content []struct {
+				Text string `json:"text"`
+			} `json:"content"`
+		}
+		results := request.Messages[len(request.Messages)-1].ToolResults
+		if len(results) != 1 || json.Unmarshal(results[0].Content, &content) != nil || len(content.Content) != 1 ||
+			json.Unmarshal([]byte(content.Content[0].Text), &reply) != nil {
+			t.Fatalf("no search result: %#v", results)
+		}
+		var names []string
+		for _, match := range reply.Tools {
+			names = append(names, match.Name)
+		}
+		return names
+	}
+	var seen [][]string
+	search := callsStep(llm.ToolCall{ID: "s", Name: SearchToolName, Arguments: json.RawMessage(`{"query":"stop object"}`)})
+	answer := func(request llm.Request, emit llm.EmitFunc) error {
+		seen = append(seen, found(request))
+		return textStep("ok")(request, emit)
+	}
+	model := &scriptedLLM{t: t, steps: []llmStep{search, answer, search, answer, search, answer}}
+	agent := searchAgent(t, model, &fakeSession{tools: searchCatalog()}, Config{})
+	for _, ctx := range []context.Context{WithUnattended(t.Context()), t.Context(), WithUnattended(t.Context())} {
+		if _, err := agent.RunTurn(ctx, nil, "stop the object", func(Event) error { return nil }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(seen) != 3 || slices.Contains(seen[0], "stop_object") || !slices.Contains(seen[1], "stop_object") || slices.Contains(seen[2], "stop_object") {
+		t.Fatalf("unattended, attended, unattended searches found %v", seen)
+	}
+}
