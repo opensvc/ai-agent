@@ -44,8 +44,13 @@ const (
 	maxHistoryTools    = 8
 	// maxHistoryShownTools bounds the tools a search of the recent turns
 	// showed without the model calling them, apart from maxHistoryTools: a
-	// search of the last turn does not push out the tools called before.
-	maxHistoryShownTools  = 4
+	// search of the last turn does not push out the tools called before. It
+	// carries all the tools one search may show, in the order the turn
+	// listed them: the next turn starts with the tools of the last request
+	// of that turn, which a provider then reads from its cache. Carrying 4
+	// of them, the next turn shared only search_tools with it, in 5 tries
+	// of 5 on the catalog of dev5, and wrote the whole prefix again.
+	maxHistoryShownTools  = maxSearchResults + closeSearchResults
 	maxSearchSummaryBytes = 240
 	// maxModelTools bounds the tools of a suspended turn state.
 	maxModelTools = 1024
@@ -114,8 +119,11 @@ type toolSelection struct {
 	// shown are the tools sent to the model during the turn, in order.
 	shown []string
 	// found are the tools the searches of the turn activated, the most
-	// recent first.
+	// recent search first, the tools of one search in its order.
 	found []string
+	// batch is the place in found of the next tool the current search or
+	// skill shows.
+	batch int
 	// carried are the tools a search of the recent turns showed, the most
 	// recent first, shown before the core tools as found.
 	carried []string
@@ -223,6 +231,13 @@ func (a *Agent) selectTools(mcpTools []*mcp.Tool, converted []llm.Tool, catalogH
 	for _, name := range state.ActiveTools {
 		selection.add(name)
 	}
+	// The tools found keep their order: the resumed turn sends the tools of
+	// the request it waited after, which a provider reads from its cache.
+	for _, name := range state.FoundTools {
+		if slices.Contains(selection.active, name) && !slices.Contains(selection.found, name) {
+			selection.found = append(selection.found, name)
+		}
+	}
 	return selection, nil
 }
 
@@ -287,6 +302,9 @@ func (s *toolSelection) show(name string) bool {
 			return false
 		}
 		s.bytes -= toolBytes(s.catalog[s.active[oldest]])
+		if index := slices.Index(s.found, s.active[oldest]); index >= 0 && index < s.batch {
+			s.batch--
+		}
 		s.found = slices.DeleteFunc(s.found, func(found string) bool { return found == s.active[oldest] })
 		s.carried = slices.DeleteFunc(s.carried, func(carried string) bool { return carried == s.active[oldest] })
 		s.active = slices.Delete(s.active, oldest, oldest+1)
@@ -294,13 +312,21 @@ func (s *toolSelection) show(name string) bool {
 	if !s.add(name) {
 		return false
 	}
-	s.found = slices.Insert(s.found, 0, name)
+	s.found = slices.Insert(s.found, s.batch, name)
+	s.batch++
 	return true
 }
 
+// startBatch starts the tools one search or skill shows: they go before
+// those of the former ones, in the order shown.
+func (s *toolSelection) startBatch() {
+	s.batch = 0
+}
+
 // tools are the tools of the next model request: search_tools, the tools
-// the searches of the turn found, the most recent first, then the core tools
-// and those of the history. A tool found right after search_tools is called:
+// the searches of the turn found, the most recent search first, the tools
+// of one search in its order, then those of the recent searches, the core
+// tools and those of the history. A tool found right after search_tools is called:
 // listed after the core tools, the model searched again for a tool it had
 // been shown in 12 of 24 replays, against none.
 func (s *toolSelection) tools() []llm.Tool {
@@ -377,6 +403,7 @@ func (s *toolSelection) run(call llm.ToolCall, titles map[string]string) llm.Too
 	if s.searches >= maxSearchesPerTurn {
 		return fail(fmt.Sprintf("The tool search is limited to %d searches per question. Answer with the tools available.", maxSearchesPerTurn))
 	}
+	s.startBatch()
 	var arguments searchArguments
 	decoder := json.NewDecoder(strings.NewReader(string(call.Arguments)))
 	decoder.DisallowUnknownFields()

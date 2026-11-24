@@ -165,7 +165,8 @@ func DisplayTurn(messages []llm.Message, timing TurnTiming) (steps []DisplayStep
 			step := &steps[position]
 			text := resultText(result.Content)
 			switch {
-			case result.IsError && text == agent.RejectedToolResultText:
+			// The answer of the confirmation may follow the text.
+			case result.IsError && strings.HasPrefix(text, agent.RejectedToolResultText):
 				// A call the user rejected did not run: it has no end.
 				step.Status, step.EndedAt = "rejected", nil
 			case result.IsError:

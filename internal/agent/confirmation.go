@@ -38,19 +38,21 @@ var rejectedToolResult = json.RawMessage(`{"content":[{"type":"text","text":"` +
 // rejected, which the history keeps.
 const RejectedToolResultText = "The user rejected this action. It was not executed."
 
-// noPendingConfirmation ends the system message of a new turn: the service
+// noPendingConfirmation ends the system message of every run: the service
 // refuses a new turn while a confirmation is pending, so a prompt never
-// answers one, whatever it says.
+// answers one, whatever it says. The answer of a confirmation ends the
+// result of its call, so that the system message of the run that resumes
+// stays the one of the run that waited.
 const noPendingConfirmation = "No confirmation is pending: the previous turn is complete."
 
 // confirmationTarget is the form of a path or node value the confirmation
 // state names; another value is left out.
 var confirmationTarget = regexp.MustCompile(`^[A-Za-z0-9._/#@:-]{1,128}$`)
 
-// confirmationState is the line the system message of a run ends with: the
-// state of the confirmation, which the agent knows and the model would have
-// to reconstitute. A resumed turn names the call the user answered, its
-// tool and the path and node it targets.
+// confirmationState is the answer of a confirmation, which ends the result
+// of its call: what the agent knows and the model would have to
+// reconstitute, the call the user answered, its tool and the path and node
+// it targets.
 func confirmationState(state *SuspendedTurn, decision Decision) string {
 	if decision == "" {
 		return noPendingConfirmation
@@ -97,7 +99,10 @@ type SuspendedTurn struct {
 	// ActiveTools are the tools the searches of the turn found, and
 	// Searches their count, for the resumed turn to see the same tools.
 	ActiveTools []string `json:"active_tools,omitempty"`
-	Searches    int      `json:"searches,omitempty"`
+	// FoundTools are the tools of ActiveTools the searches found, in the
+	// order the requests list them.
+	FoundTools []string `json:"found_tools,omitempty"`
+	Searches   int      `json:"searches,omitempty"`
 	// ToolSearch tells that the turn searched the catalog: it keeps
 	// searching when it resumes, so that its planned search calls run.
 	ToolSearch bool `json:"tool_search,omitempty"`
@@ -155,7 +160,7 @@ func (s SuspendedTurn) validate(maxIterations int) error {
 	if len(s.Calls) == 0 || len(s.Calls) > maxToolCallsPerTurn || len(s.Results) >= len(s.Calls) {
 		return fmt.Errorf("suspended turn has no pending tool call")
 	}
-	if s.Searches < 0 || s.Searches > maxSearchesPerTurn || len(s.ActiveTools) > maxModelTools {
+	if s.Searches < 0 || s.Searches > maxSearchesPerTurn || len(s.ActiveTools) > maxModelTools || len(s.FoundTools) > maxModelTools {
 		return fmt.Errorf("suspended turn tool search state is out of range")
 	}
 	if err := ValidateInterfaceContext(s.InterfaceContext); err != nil {
@@ -375,7 +380,21 @@ func (s SuspendedTurn) ValidateEditedArguments(edited json.RawMessage) error {
 // the user edited its arguments and which it ran with: the message of the
 // model keeps the call it proposed.
 func editedToolResult(result json.RawMessage, edited json.RawMessage) json.RawMessage {
-	note := map[string]string{"type": "text", "text": "The user edited the arguments before approving; the call ran with: " + string(edited)}
+	return addResultText(result, "The user edited the arguments before approving; the call ran with: "+string(edited), true)
+}
+
+// withResultText ends a result with a text of the agent, such as the answer
+// of the confirmation of its call; an empty text leaves it as it is.
+func withResultText(result json.RawMessage, text string) json.RawMessage {
+	if text == "" {
+		return result
+	}
+	return addResultText(result, text, false)
+}
+
+// addResultText adds a text content to a result, first or last; a result it
+// cannot read is left as it is.
+func addResultText(result json.RawMessage, text string, first bool) json.RawMessage {
 	var payload map[string]json.RawMessage
 	if err := json.Unmarshal(result, &payload); err != nil {
 		return result
@@ -386,8 +405,12 @@ func editedToolResult(result json.RawMessage, edited json.RawMessage) json.RawMe
 			return result
 		}
 	}
-	noteData, _ := json.Marshal(note)
-	content = append([]json.RawMessage{noteData}, content...)
+	noteData, _ := json.Marshal(map[string]string{"type": "text", "text": text})
+	if first {
+		content = append([]json.RawMessage{noteData}, content...)
+	} else {
+		content = append(content, noteData)
+	}
 	payload["content"], _ = json.Marshal(content)
 	data, err := json.Marshal(payload)
 	if err != nil {
