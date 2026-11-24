@@ -41,7 +41,7 @@ func TestClientStreamsTextAndUsage(t *testing.T) {
 		response.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 		_, _ = fmt.Fprint(response, "event: response.output_text.delta\r\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"cluster \"}\r\n\r\n")
 		_, _ = fmt.Fprint(response, "data: {\"type\":\"response.output_text.delta\",\"delta\":\"healthy\"}\r\n\r\n")
-		_, _ = fmt.Fprint(response, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":2,\"total_tokens\":12,\"input_tokens_details\":{\"cached_tokens\":6}},\"output\":[]}}\r\n\r\n")
+		_, _ = fmt.Fprint(response, "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":2,\"total_tokens\":12,\"input_tokens_details\":{\"cached_tokens\":6,\"cache_write_tokens\":3}},\"output\":[]}}\r\n\r\n")
 	}))
 	t.Cleanup(server.Close)
 
@@ -60,7 +60,7 @@ func TestClientStreamsTextAndUsage(t *testing.T) {
 	if events[0].TextDelta+events[1].TextDelta != "cluster healthy" {
 		t.Fatalf("unexpected text events %#v", events[:2])
 	}
-	if events[2].Type != llm.EventUsage || events[2].Usage.TotalTokens != 12 || events[2].Usage.CacheReadTokens != 6 {
+	if events[2].Type != llm.EventUsage || events[2].Usage.TotalTokens != 12 || events[2].Usage.CacheReadTokens != 6 || events[2].Usage.CacheWriteTokens != 3 {
 		t.Fatalf("unexpected usage event %#v", events[2])
 	}
 	if events[3].Type != llm.EventCompleted || events[3].FinishReason != llm.FinishReasonCompleted {
@@ -326,5 +326,23 @@ func TestClientAsksForTheEncryptedReasoning(t *testing.T) {
 		if got := fmt.Sprint(body["include"]) == "["+includeReasoning+"]"; got != want || body["store"] != false {
 			t.Fatalf("effort %q: include = %v, store = %v", effort, body["include"], body["store"])
 		}
+	}
+}
+
+// A compatible endpoint counting more cache tokens than the input is not
+// believed beyond it: the writes are bounded by the input not read.
+func TestUsageBoundsTheCacheTokensByTheInput(t *testing.T) {
+	stream := "data: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":2,\"total_tokens\":12,\"input_tokens_details\":{\"cached_tokens\":6,\"cache_write_tokens\":9}},\"output\":[]}}\r\n\r\n"
+	var usage *llm.Usage
+	if err := consumeStream(strings.NewReader(stream), func(event llm.Event) error {
+		if event.Type == llm.EventUsage {
+			usage = event.Usage
+		}
+		return nil
+	}, ""); err != nil {
+		t.Fatal(err)
+	}
+	if usage == nil || usage.CacheReadTokens != 6 || usage.CacheWriteTokens != 4 {
+		t.Fatalf("usage = %+v", usage)
 	}
 }
