@@ -17,7 +17,7 @@ import (
 // HistoryCompactionPolicy names the compaction of the history below; it is
 // recorded with each run, so that a change of policy is visible in the
 // feedback.
-const HistoryCompactionPolicy = "v2"
+const HistoryCompactionPolicy = "v3"
 
 // HistoryCompaction bounds the tool results of the earlier turns a model
 // request carries. The stored messages are never changed: the model
@@ -125,23 +125,24 @@ func (c HistoryCompaction) validate() error {
 
 // searchTool is the tool whose results the agent reads back: searchShown
 // gives the tools a search of the former turns showed. Its results are kept
-// whole in the last turn and in the last turn that searched, those the
-// agent reads them from; elsewhere they are a text as any other.
+// whole in the last turn and in the last turn that searched, a refused
+// search not counted, those the agent reads them from; elsewhere they are
+// whole or a marker, never compacted on their own, so that they stay stable
+// from a turn to the next.
 const searchTool = agent.SearchToolName
 
 // compactHistory returns a copy of history whose tool results fit the
 // policy, what it did, and the indexes of the messages holding a compacted
 // result, one per result. Small results, errors and the searches the agent
-// reads back are kept as they are; the structured results are compacted,
-// the oldest more strongly when all the results exceed
-// MaxHistoryResultBytes, then reduced to a marker with the text results,
-// the oldest first. When they still exceed it, the oldest turn is left out
-// whole and the turns kept are compacted again from their original results,
-// so that a turn left out frees its room for the others. The last turn is
-// never left out, and over the budget alone, the turns before it are left
-// out only while their own results exceed the budget: the model never
-// loses the turn the user answers, nor the earlier ones for nothing. Calls,
-// arguments and call IDs are kept.
+// reads back are kept as they are; the others are compacted turn by turn, so
+// that the history a turn sends begins as the one the turn before sent, see
+// compactTurns. When the results still exceed MaxHistoryResultBytes, the
+// oldest turn is left out whole and the turns kept are compacted again from
+// their original results, so that a turn left out frees its room for the
+// others. The last turn is never left out, and over the budget alone, the
+// turns before it are left out only while their own results exceed the
+// budget: the model never loses the turn the user answers, nor the earlier
+// ones for nothing. Calls, arguments and call IDs are kept.
 func compactHistory(history []llm.Message, policy HistoryCompaction) ([]llm.Message, HistoryStats, []int) {
 	policy = policy.withDefaults()
 	stats := HistoryStats{Policy: HistoryCompactionPolicy, MaxResultBytes: policy.MaxResultBytes, MaxHistoryResultBytes: policy.MaxHistoryResultBytes}
@@ -153,8 +154,9 @@ func compactHistory(history []llm.Message, policy HistoryCompaction) ([]llm.Mess
 	}
 	floor := -1
 	start := 0
+	forms := newResultForms(policy, history)
 	for {
-		messages, total, compacted := policy.compactTurns(history[start:])
+		messages, total, compacted := policy.compactTurns(history[start:], start, forms)
 		if total <= policy.MaxHistoryResultBytes || start >= last {
 			stats.CompactedResults = len(compacted)
 			return messages, stats, compacted
@@ -162,7 +164,7 @@ func compactHistory(history []llm.Message, policy HistoryCompaction) ([]llm.Mess
 		// The last turn over the budget alone: leaving the turns before it
 		// out cannot bring the results under it.
 		if floor < 0 {
-			_, floor, _ = policy.compactTurns(history[last:])
+			_, floor, _ = policy.compactTurns(history[last:], last, forms)
 		}
 		if floor > policy.MaxHistoryResultBytes && resultBytes(messages[:last-start]) <= policy.MaxHistoryResultBytes {
 			stats.CompactedResults = len(compacted)
@@ -189,16 +191,98 @@ func resultBytes(messages []llm.Message) int {
 	return size
 }
 
-// compactTurns compacts the results of history, the oldest more strongly
-// when they exceed the global budget, and returns the copy, the size of its
-// results and the indexes of the messages holding a compacted result.
-func (c HistoryCompaction) compactTurns(history []llm.Message) ([]llm.Message, int, []int) {
+// resultForms are the forms of the results of a history, each computed once
+// for a call of compactHistory, at its first need, whatever turns are left
+// out: the result compacted on its own, and its marker.
+type resultForms struct {
+	policy  HistoryCompaction
+	history []llm.Message
+	alone   map[[2]int]json.RawMessage
+	markers map[[2]int]json.RawMessage
+	none    map[[2]int]bool
+}
+
+func newResultForms(policy HistoryCompaction, history []llm.Message) *resultForms {
+	return &resultForms{policy: policy, history: history,
+		alone: map[[2]int]json.RawMessage{}, markers: map[[2]int]json.RawMessage{}, none: map[[2]int]bool{}}
+}
+
+// result gives a result of the history.
+func (f *resultForms) result(at [2]int) llm.ToolResult {
+	return f.history[at[0]].ToolResults[at[1]]
+}
+
+// compacted gives a result compacted on its own to MaxResultBytes, or as it
+// is when it fits, is an error or is a search. A history compacted begins at
+// a message of the user, so that the calls of a result are always read
+// before it: a result is a search, or not, whatever turns are left out.
+func (f *resultForms) compacted(at [2]int, search bool) json.RawMessage {
+	if form, ok := f.alone[at]; ok {
+		return form
+	}
+	result := f.result(at)
+	form := result.Content
+	if !result.IsError && !search && len(form) > f.policy.MaxResultBytes {
+		if compacted, ok := f.policy.compactResult(form, f.policy.MaxResultBytes); ok && len(compacted) < len(form) {
+			form = compacted
+		}
+	}
+	f.alone[at] = form
+	return form
+}
+
+// marker gives the marker of a result, and reports false for a result the
+// compaction does not handle, such as one of an image.
+func (f *resultForms) marker(at [2]int) (json.RawMessage, bool) {
+	if marker, ok := f.markers[at]; ok {
+		return marker, true
+	}
+	if f.none[at] {
+		return nil, false
+	}
+	content := f.result(at).Content
+	marker, ok := f.policy.compactResult(content, 0)
+	if !ok {
+		marker, ok = f.policy.textMarker(content)
+	}
+	if !ok {
+		f.none[at] = true
+		return nil, false
+	}
+	f.markers[at] = marker
+	return marker, true
+}
+
+// compactTurns compacts the results of history, which begins at offset in
+// the history of forms, turn by turn, each decision taken on that turn and
+// the turns before it, never on the next ones, so that the compaction of
+// the history of a turn begins as the compaction of the history of the
+// turn before, which a provider then reads from its cache. Each result is
+// compacted on its own to MaxResultBytes. When the results of the turns so
+// far exceed MaxHistoryResultBytes:
+//   - the results of the turn itself are reduced to a marker, the largest
+//     first, the first of equal sizes, while they exceed it alone;
+//   - then, while all exceed it, those of the turns before, those over the
+//     target alone first, then the oldest first, down to half of it, or to
+//     what the turn leaves of it when less, which leaves room for the next
+//     turns;
+//   - then, when the turns before hold more than the turn leaves them, such
+//     as errors or a search kept, the turn itself again, down to what they
+//     leave it.
+//
+// A result reduced so stays a marker, and a marker is never put in place of
+// a smaller result. Errors, and the searches of the turn and of the last
+// turn that searched, at each step, are kept. It returns the copy, the size
+// of its results and the indexes of the messages holding a compacted result,
+// one per result.
+func (c HistoryCompaction) compactTurns(history []llm.Message, offset int, forms *resultForms) ([]llm.Message, int, []int) {
 	type ref struct{ message, result int }
 	var refs []ref
-	// The name of the tool of each result, read from the calls before it:
-	// call IDs repeat from a turn to the next with some providers.
-	searches := map[ref]int{}
-	searched, turn := -1, -1
+	turnOf := map[ref]int{}
+	search := map[ref]bool{}
+	turn := -1
+	// The tool of a result is read from the calls before it: call IDs
+	// repeat from a turn to the next with some providers.
 	var calls map[string]string
 	for i, message := range history {
 		if message.Role == llm.RoleUser {
@@ -211,119 +295,118 @@ func (c HistoryCompaction) compactTurns(history []llm.Message) ([]llm.Message, i
 			}
 		}
 		for j, result := range message.ToolResults {
-			refs = append(refs, ref{i, j})
-			if calls[result.CallID] == searchTool {
-				searches[ref{i, j}] = turn
-				searched = turn
-			}
+			r := ref{i, j}
+			refs = append(refs, r)
+			turnOf[r] = turn
+			search[r] = calls[result.CallID] == searchTool
 		}
 	}
-	kept := func(r ref) bool {
-		if history[r.message].ToolResults[r.result].IsError {
-			return true
+	at := func(r ref) [2]int { return [2]int{offset + r.message, r.result} }
+	isError := func(r ref) bool { return history[r.message].ToolResults[r.result].IsError }
+	marked := map[ref]bool{}
+	size := func(r ref) int {
+		if marked[r] {
+			marker, _ := forms.marker(at(r))
+			return len(marker)
 		}
-		at, ok := searches[r]
-		return ok && (at == turn || at == searched)
+		return len(forms.compacted(at(r), search[r]))
 	}
-	// A result compacted to a budget, or to a marker alone for budget 0,
-	// once, as the reductions below try it again.
-	type attempt struct {
-		ref
-		budget int
-	}
-	memo := map[attempt]json.RawMessage{}
-	compact := func(r ref, budget int) (json.RawMessage, bool) {
-		if content, ok := memo[attempt{r, budget}]; ok {
-			return content, content != nil
-		}
-		original := history[r.message].ToolResults[r.result].Content
-		content, ok := c.compactResult(original, budget)
-		if !ok && budget == 0 {
-			content, ok = c.textMarker(original)
-		}
-		if !ok {
-			content = nil
-		}
-		memo[attempt{r, budget}] = content
-		return content, ok
-	}
-	// reduce compacts the results from their originals: those of markers to
-	// a marker alone, the others to their budget, then the oldest to a
-	// quarter of it while the results exceed the global budget.
-	reduce := func(markers map[ref]bool) ([]llm.Message, map[ref]bool, int) {
-		messages := make([]llm.Message, len(history))
-		for i, message := range history {
-			message.ToolCalls = slices.Clone(message.ToolCalls)
-			message.ToolResults = slices.Clone(message.ToolResults)
-			messages[i] = message
-		}
-		compacted := map[ref]bool{}
-		total := resultBytes(messages)
-		set := func(r ref, budget int) {
-			result := &messages[r.message].ToolResults[r.result]
-			if kept(r) || len(result.Content) <= budget {
-				return
-			}
-			if content, ok := compact(r, budget); ok && len(content) < len(result.Content) {
-				total += len(content) - len(result.Content)
-				result.Content = content
-				compacted[r] = true
-			}
-		}
+	low := c.MaxHistoryResultBytes / 2
+	for step := 0; step <= turn; step++ {
+		// A refused search shows no tool: the agent reads back the last
+		// one that did.
+		searched, before, own := -1, 0, 0
 		for _, r := range refs {
-			if markers[r] {
-				set(r, 0)
-			} else {
-				set(r, c.MaxResultBytes)
-			}
-		}
-		for _, r := range refs {
-			if total <= c.MaxHistoryResultBytes {
+			if turnOf[r] > step {
 				break
 			}
-			if !markers[r] {
-				set(r, c.MaxResultBytes/4)
+			if turnOf[r] < step {
+				before += size(r)
+			} else {
+				own += size(r)
+			}
+			if search[r] && !isError(r) {
+				searched = turnOf[r]
 			}
 		}
-		return messages, compacted, total
-	}
-	// Over the global budget, the results are reduced to a marker, the
-	// oldest first, whether structured or text: a text is never cut, and a
-	// text that fits once the structured results are reduced stays whole.
-	// The others are compacted again from their originals, so that a marker
-	// frees its room for them, and the markers that then fit restored, the
-	// most recent first.
-	markers := map[ref]bool{}
-	messages, compacted, total := reduce(markers)
-	for _, r := range refs {
-		if total <= c.MaxHistoryResultBytes {
-			break
-		}
-		content, ok := compact(r, 0)
-		if !ok || kept(r) || len(content) >= len(messages[r.message].ToolResults[r.result].Content) {
+		if before+own <= c.MaxHistoryResultBytes {
 			continue
 		}
-		markers[r] = true
-		messages, compacted, total = reduce(markers)
-	}
-	if len(markers) > 0 && total <= c.MaxHistoryResultBytes {
-		for _, r := range slices.Backward(refs) {
-			if !markers[r] {
-				continue
+		reducible := func(r ref) (json.RawMessage, bool) {
+			if marked[r] || isError(r) || (search[r] && turnOf[r] == searched) {
+				return nil, false
 			}
-			delete(markers, r)
-			if restored, restoredCompacted, restoredTotal := reduce(markers); restoredTotal <= c.MaxHistoryResultBytes {
-				messages, compacted, total = restored, restoredCompacted, restoredTotal
-			} else {
-				markers[r] = true
+			marker, ok := forms.marker(at(r))
+			return marker, ok && len(marker) < size(r)
+		}
+		// reduceTurn reduces the results of the turn itself, the largest
+		// first, until they hold limit: a small result stays whole when a
+		// large one makes room.
+		reduceTurn := func(limit int) {
+			for own > limit {
+				var largest ref
+				var marker json.RawMessage
+				found := false
+				for _, r := range refs {
+					if turnOf[r] != step {
+						continue
+					}
+					if m, ok := reducible(r); ok && (!found || size(r) > size(largest)) {
+						largest, marker, found = r, m, true
+					}
+				}
+				if !found {
+					return
+				}
+				own -= size(largest) - len(marker)
+				marked[largest] = true
 			}
 		}
+		// The turn itself down to the budget; then, when the turns before
+		// and it still exceed it, the turns before, the oldest first, down to
+		// half the budget, or to what the turn leaves of it, which leaves room
+		// for the next turns; then the turn itself again, when the turns
+		// before cannot make room enough.
+		reduceTurn(c.MaxHistoryResultBytes)
+		if before+own > c.MaxHistoryResultBytes {
+			target := max(min(low, c.MaxHistoryResultBytes-own), 0)
+			// A result over the target alone first, whatever its age: the
+			// older ones would be reduced for nothing before it.
+			for _, oversized := range []bool{true, false} {
+				for _, r := range refs {
+					if turnOf[r] >= step || before <= target {
+						break
+					}
+					if oversized && size(r) <= target {
+						continue
+					}
+					if marker, ok := reducible(r); ok {
+						before -= size(r) - len(marker)
+						marked[r] = true
+					}
+				}
+			}
+			reduceTurn(c.MaxHistoryResultBytes - before)
+		}
 	}
-	indexes := make([]int, 0, len(compacted))
+	messages := make([]llm.Message, len(history))
+	for i, message := range history {
+		message.ToolCalls = slices.Clone(message.ToolCalls)
+		message.ToolResults = slices.Clone(message.ToolResults)
+		messages[i] = message
+	}
+	var indexes []int
+	total := 0
 	for _, r := range refs {
-		if compacted[r] {
+		content := forms.compacted(at(r), search[r])
+		if marked[r] {
+			content, _ = forms.marker(at(r))
+		}
+		if !bytes.Equal(content, history[r.message].ToolResults[r.result].Content) {
+			messages[r.message].ToolResults[r.result].Content = content
 			indexes = append(indexes, r.message)
 		}
+		total += len(content)
 	}
 	return messages, total, indexes
 }
