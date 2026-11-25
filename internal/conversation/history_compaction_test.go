@@ -1013,3 +1013,52 @@ func TestCompactHistoryReducesTheTurnWhenTheTurnsBeforeCannotMakeRoom(t *testing
 		t.Fatalf("%+v: the turn was not reduced to what the error leaves it", stats)
 	}
 }
+
+// A wide result whose first items do not fit with their nested details, as
+// the status of a cluster of a hundred objects, keeps its scalars and its
+// small values, such as counts by state, at a shallower depth, rather than
+// its provenance alone.
+func TestCompactResultKeepsAShallowerViewOfAWideResult(t *testing.T) {
+	var objects []string
+	// Each object alone exceeds the budget of a result: its resources, no
+	// more than the items kept, hold many scalars, all kept.
+	var fields []string
+	for f := range 20 {
+		fields = append(fields, fmt.Sprintf(`"field_%02d":"%s"`, f, strings.Repeat("v", 50)))
+	}
+	var resources []string
+	for r := range 8 {
+		resources = append(resources, fmt.Sprintf(`"fs#%d":{%s}`, r, strings.Join(fields, ",")))
+	}
+	for i := range 100 {
+		objects = append(objects, fmt.Sprintf(`{"path":"ns/svc/s%03d","avail":"up","resources":{%s}}`, i, strings.Join(resources, ",")))
+	}
+	structured := `{"provenance":{"source":"daemon"},"cluster":{"name":"c1","id":"x"},` +
+		`"objects":{"count":100,"state_counts":{"monitor":[{"value":"idle","count":97},{"value":"start failed","count":3}]},"items":[` + strings.Join(objects, ",") + `]}}`
+	raw := structuredResult(t, structured, true)
+	compacted, ok := DefaultHistoryCompaction.compactResult(raw, DefaultHistoryCompaction.MaxResultBytes)
+	if !ok || len(compacted) > DefaultHistoryCompaction.MaxResultBytes {
+		t.Fatalf("got %d bytes, want at most %d", len(compacted), DefaultHistoryCompaction.MaxResultBytes)
+	}
+	for _, want := range []string{`"name":"c1"`, `"count":100`, `"start failed"`, `"path":"ns/svc/s000"`, `"avail":"up"`} {
+		if !strings.Contains(string(compacted), want) {
+			t.Errorf("the compacted result lost %s: %s", want, compacted)
+		}
+	}
+}
+
+// Past the depth, a value as small as a string kept is kept; a larger one is
+// omitted, with its omission.
+func TestCompactValueKeepsSmallValuesPastTheDepth(t *testing.T) {
+	c := DefaultHistoryCompaction
+	c.MaxDepth = 1
+	value := map[string]any{"a": map[string]any{"counts": []any{map[string]any{"v": "up", "n": json.Number("3")}}, "big": []any{strings.Repeat("y", 300)}}}
+	var omissions []omission
+	out := c.compactValue(value, "", 8, 0, &omissions).(map[string]any)["a"].(map[string]any)
+	if _, ok := out["counts"]; !ok {
+		t.Errorf("the small value past the depth was omitted: %+v", out)
+	}
+	if _, ok := out["big"]; ok || !hasOmission(decodedMarker{Omissions: omissions}, omission{Path: "/a/big", Kind: omittedDepth, Omitted: 304}) {
+		t.Errorf("the large value past the depth was kept or not recorded: %+v %+v", out, omissions)
+	}
+}
