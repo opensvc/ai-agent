@@ -944,7 +944,13 @@ keep their first items, 8 at first, fewer until the result fits, and an
 array keeps the prefix before its first item it cannot keep whole, so that
 the indexes stay true; an object of more than 32 entries, such as a status
 per node, keeps its first entries; collections nested deeper than 6 levels
-are omitted. Beside the structured content, the text copy the MCP SDK adds
+are omitted, but a value of at most 256 bytes, such as counts by state. When
+the first items do not fit with their nested details, the depth kept is
+lowered, from 6 to 1 level, at each number of items, before fewer items are
+kept: a wide result, such as the status of a cluster of a hundred objects,
+keeps its first objects with their states and its counts by state, rather
+than its provenance alone (a result so emptied led a model to withdraw the
+answer it had given from it). Beside the structured content, the text copy the MCP SDK adds
 is dropped: a single text, without annotations or metadata, holding the
 value of the structured content and nothing after it. Distinct texts, such
 as a warning, keep the prefix of those of at most 256 bytes, so that their

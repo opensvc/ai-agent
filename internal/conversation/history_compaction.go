@@ -478,12 +478,28 @@ func (c HistoryCompaction) compactResult(raw json.RawMessage, budget int) (json.
 			base     []omission
 		}{nil, []omission{{Path: "/content", Kind: omittedArrayTail, Omitted: len(contents)}}})
 	}
+	// Each width of the collections is tried at every depth, from the
+	// deepest: a wide result, such as the status of a cluster of a hundred
+	// objects, keeps its first items with their scalars, their states, when
+	// their nested details do not fit, rather than nothing. Without items,
+	// the last width, the depth no longer matters.
 	for _, attempt := range attempts {
 		for _, items := range c.itemSteps() {
-			omissions := slices.Clone(attempt.base)
-			value := c.compactValue(structured, "/structuredContent", items, 0, &omissions)
-			if data := encode(attempt.contents, value, omissions, true); len(data) <= budget {
-				return data, true
+			depths := []int{c.MaxDepth}
+			if items > 0 {
+				depths = depths[:0]
+				for depth := c.MaxDepth; depth >= 1; depth-- {
+					depths = append(depths, depth)
+				}
+			}
+			for _, depth := range depths {
+				shallow := c
+				shallow.MaxDepth = depth
+				omissions := slices.Clone(attempt.base)
+				value := shallow.compactValue(structured, "/structuredContent", items, 0, &omissions)
+				if data := encode(attempt.contents, value, omissions, true); len(data) <= budget {
+					return data, true
+				}
 			}
 		}
 	}
@@ -580,7 +596,7 @@ func (c HistoryCompaction) largeObjectEntries() int {
 // a provenance, and the first items of the collections, recording every
 // omission. Numbers are kept as written; kept strings are never changed: a
 // longer one is omitted whole. A collection nested deeper than MaxDepth is
-// omitted. An array keeps a prefix of its items, so that their indexes stay
+// omitted, but an object's value as small as a string kept. An array keeps a prefix of its items, so that their indexes stay
 // true: it stops before an item it cannot keep whole.
 func (c HistoryCompaction) compactValue(value any, path string, items int, depth int, omissions *[]omission) any {
 	switch typed := value.(type) {
@@ -609,6 +625,11 @@ func (c HistoryCompaction) compactValue(value any, path string, items int, depth
 				}
 				out[key] = child
 			case c.isSmallScalarObject(child):
+				out[key] = child
+			case depth+1 > c.MaxDepth && c.isSmallValue(child):
+				// Past the depth, a value as small as a string kept, such
+				// as counts by state, is kept whole: its omission would
+				// cost as much as the value, and lose what it tells.
 				out[key] = child
 			case depth+1 > c.MaxDepth:
 				data, _ := json.Marshal(child)
@@ -683,6 +704,12 @@ func (c HistoryCompaction) isSmallScalarObject(value any) bool {
 		}
 	}
 	return true
+}
+
+// isSmallValue tells a value whose encoding is no longer than a string kept.
+func (c HistoryCompaction) isSmallValue(value any) bool {
+	data, err := json.Marshal(value)
+	return err == nil && len(data) <= c.MaxStringBytes
 }
 
 // pointerToken escapes a key as a JSON pointer token.
