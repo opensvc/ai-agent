@@ -244,6 +244,16 @@ func serveConversationRun(backend string, service ConversationService, models *l
 			}
 			runContext = agent.WithModel(runContext, model.ID)
 			attributes = append(attributes, slog.String("model_id", model.ID))
+			// The skill the client asked is loaded first by the agent.
+			skill, err := input.Skill()
+			if err != nil {
+				reject(http.StatusBadRequest, &APIError{Code: "invalid_skill", Message: err.Error()})
+				return
+			}
+			if skill != "" {
+				runContext = agent.WithSkill(runContext, skill)
+				attributes = append(attributes, slog.String("skill", skill))
+			}
 			text, skipped, err := input.Prompt()
 			prompt = text
 			if err != nil {
@@ -429,7 +439,7 @@ func agentCapabilities(feedbackDisabled bool) map[string]any {
 		"tools":          map[string]any{"supported": true, "clientProvided": true},
 		"humanInTheLoop": map[string]any{"supported": true, "approvals": true, "interrupts": true, "approveWithEdits": true},
 		"multimodal":     map[string]any{"input": map[string]any{"image": false, "audio": false, "video": false, "pdf": false, "file": false}},
-		"custom":         map[string]any{"feedback": !feedbackDisabled, "models": true},
+		"custom":         map[string]any{"feedback": !feedbackDisabled, "models": true, "skills": true},
 	}
 }
 

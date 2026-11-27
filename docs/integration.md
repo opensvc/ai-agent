@@ -91,6 +91,12 @@ const result = await agent.runAgent({ runId: crypto.randomUUID() }, {
   among those of `GET /v1/{backend}/models` (section 7), which the parameters of
   `runAgent` carry: `{ runId, forwardedProps: { model: "haiku" } }`. Absent, the default
   model; unknown, 400 `model_unknown`.
+- `forwardedProps.skill`, optional, is the name of a skill of
+  `GET /v1/{backend}/skills` the agent loads first, before the model is
+  asked, when the capabilities declare `custom.skills`:
+  `{ runId, forwardedProps: { skill: "morning-check" } }`. Not shaped as a
+  name, 400 `invalid_skill`; not served to the user, `RUN_ERROR`
+  `skill_unavailable`. See [Asked skills](api.md#asked-skills).
 - `internal/api/testdata/agui/conformance.mjs`, in the repository of the
   agent, is a complete client: runs, a confirmation and its resume, a tool
   of the client, and a resynchronization.
@@ -111,7 +117,7 @@ const result = await agent.runAgent({ runId: crypto.randomUUID() }, {
 | `TOOL_CALL_RESULT` | Its result, as JSON, or a note of its size beyond 64 KiB; the model reads a result of text alone as its text |
 | `CUSTOM` `opensvc.warning` | A note for the developer: content parts or a version the agent did not read |
 | `RUN_FINISHED` | The end: `result.turnId` for the feedback, `usage` for the tokens, `outcome` success, success with calls of tools of the client pending, or an interrupt |
-| `RUN_ERROR` | The run failed: `code` and `message`, such as `request_timeout`, `tool_name_conflict` |
+| `RUN_ERROR` | The run failed: `code` and `message`, such as `request_timeout`, `tool_name_conflict`, `skill_unavailable` |
 
 A snapshot holds what the model reads: the texts, the tool calls and their
 results as the history compaction leaves them, as JSON, so a reloaded

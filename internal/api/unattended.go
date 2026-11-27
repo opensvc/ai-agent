@@ -100,6 +100,16 @@ func serveUnattendedRun(backend string, runner UnattendedRunner, models *llm.Mod
 			return
 		}
 		attributes = append(attributes, slog.String("model_id", model.ID))
+		// The skill the caller asked is loaded first by the agent, as a
+		// procedure an unattended run follows whatever the model chooses.
+		skill, err := input.Skill()
+		if err != nil {
+			reject(http.StatusBadRequest, "invalid_skill", err.Error())
+			return
+		}
+		if skill != "" {
+			attributes = append(attributes, slog.String("skill", skill))
+		}
 		prompt, skipped, err := input.Prompt()
 		switch {
 		case err != nil:
@@ -176,7 +186,11 @@ func serveUnattendedRun(backend string, runner UnattendedRunner, models *llm.Mod
 			}
 		}
 		streamRun(response, request, audit, "unattended_run", attributes, codec, func(emit agent.EmitFunc) error {
-			result, err := runner.RunTurn(agent.WithModel(agent.WithInterfaceContext(agent.WithUnattended(request.Context()), interfaceContext), model.ID), nil, prompt, func(event agent.Event) error {
+			runContext := agent.WithModel(agent.WithInterfaceContext(agent.WithUnattended(request.Context()), interfaceContext), model.ID)
+			if skill != "" {
+				runContext = agent.WithSkill(runContext, skill)
+			}
+			result, err := runner.RunTurn(runContext, nil, prompt, func(event agent.Event) error {
 				record(event)
 				return emit(event)
 			})

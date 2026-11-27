@@ -172,6 +172,31 @@ model: the runs are on the default model.
 
 See [the API](api.md#models).
 
+## Skills
+
+When `GET /v1/om3/capabilities` returns `custom.skills` true, read
+`GET /v1/om3/skills`, and let the user ask one of its skills for a prompt.
+An agent without `custom.skills`, or a list that cannot be read or is empty,
+offers none.
+
+- A `/` typed at the start of an empty message box opens the list of the
+  skills, filtered by what follows, each by its `name` and its
+  `description`, chosen with the arrows and Enter or Tab. Chosen, the skill
+  is a tag over the message box, removable; the words typed after it are the
+  prompt. A `/` elsewhere, or once a skill is chosen, is text.
+- Send the skill in `forwardedProps.skill` with the new prompt. A skill
+  chosen without words sends `/` and its name as the prompt, which the
+  conversation shows as the message of the user.
+- The agent tells the load as a step, `load_skill` and the skill, before the
+  answer, and keeps it in the history; a load refused ends with an error
+  result before the `RUN_ERROR`.
+- On `RUN_ERROR` `skill_unavailable`, the skill is no longer served to the
+  user, or could not be loaded: read the list again, tell the user, and keep
+  their prompt for them to send it again. On 400 `invalid_skill`, the client
+  sent a name not shaped as one.
+
+See [the API](api.md#asked-skills).
+
 ## Interface context
 
 With a new prompt, send in `context` what the screen shows and what the user

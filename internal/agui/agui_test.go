@@ -124,11 +124,35 @@ func TestEncoderFailureClosesTheText(t *testing.T) {
 
 func TestToolResultIsBounded(t *testing.T) {
 	large := json.RawMessage(`"` + strings.Repeat("a", maxToolResultBytes) + `"`)
-	if got := toolResult(large); !strings.Contains(got, `"omitted":true`) {
+	if got := toolResult(large, false); !strings.Contains(got, `"omitted":true`) || strings.Contains(got, "isError") {
 		t.Fatalf("large result = %.80s", got)
 	}
-	if got := toolResult(nil); got != "{}" {
+	if got := toolResult(nil, false); got != "{}" {
 		t.Fatalf("empty result = %s", got)
+	}
+}
+
+// A refusal says isError true to the client, the result of a tool of the
+// agent carrying none of its own; one the MCP marked is given as it is.
+func TestToolResultTellsARefusal(t *testing.T) {
+	for _, test := range []struct {
+		result json.RawMessage
+		want   string
+	}{
+		{json.RawMessage(`{"content":[{"type":"text","text":"The skill x is not served to you now."}]}`), `{"content":[{"type":"text","text":"The skill x is not served to you now."}],"isError":true}`},
+		{json.RawMessage(`{"content":[],"isError":true}`), `{"content":[],"isError":true}`},
+		{nil, `{"isError":true}`},
+		{json.RawMessage(`"text"`), `"text"`},
+	} {
+		if got := toolResult(test.result, true); got != test.want {
+			t.Fatalf("refused %s = %s, want %s", test.result, got, test.want)
+		}
+	}
+	if got := toolResult(json.RawMessage(`"`+strings.Repeat("a", maxToolResultBytes)+`"`), true); !strings.Contains(got, `"isError":true`) {
+		t.Fatalf("large refusal = %.120s", got)
+	}
+	if got := toolResult(json.RawMessage(`{"content":[]}`), false); got != `{"content":[]}` {
+		t.Fatalf("result = %s", got)
 	}
 }
 

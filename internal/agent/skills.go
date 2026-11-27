@@ -2,11 +2,14 @@ package agent
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -31,6 +34,73 @@ const (
 	// skillToolsKey names, in the metadata of a skill, the tools it uses.
 	skillToolsKey = "opensvc/tools"
 )
+
+// A skill asked by the client is loaded by the agent itself, before the first
+// request to the model of a new turn: the procedure no longer depends on the
+// model choosing it, and any skill the server serves to the user may be asked,
+// not only those the description of load_skill lists. The load is a call of
+// load_skill as any other, told to the client and kept in the history; one
+// that fails ends the turn.
+
+// MaxSkillNameBytes bounds the name of a skill, as the Agent Skills
+// specification does: lowercase letters, digits and hyphens.
+const MaxSkillNameBytes = 64
+
+var skillName = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$`)
+
+// ValidSkillName tells whether name is shaped as the name of a skill.
+func ValidSkillName(name string) bool {
+	return skillName.MatchString(name)
+}
+
+// ErrSkillUnavailable is the failure of a turn whose skill, asked by the
+// client, is not served to the user, or could not be loaded.
+var ErrSkillUnavailable = errors.New("the skill asked is unavailable")
+
+type skillKey struct{}
+
+// WithSkill loads the skill of name at the start of the new turns of ctx;
+// empty, none.
+func WithSkill(ctx context.Context, name string) context.Context {
+	return context.WithValue(ctx, skillKey{}, name)
+}
+
+// SkillFrom is the name of the skill the new turns of ctx load first; empty
+// for none.
+func SkillFrom(ctx context.Context) string {
+	name, _ := ctx.Value(skillKey{}).(string)
+	return name
+}
+
+// askedSkillCall is the call of load_skill the agent makes for the skill of
+// name, the first of a new turn, before the model is asked.
+func askedSkillCall(name string) llm.ToolCall {
+	id := make([]byte, 12)
+	_, _ = rand.Read(id)
+	arguments, _ := json.Marshal(map[string]string{"skill": name})
+	return llm.ToolCall{ID: "call_skill_" + hex.EncodeToString(id), Name: LoadSkillToolName, Arguments: arguments}
+}
+
+// refusedSkill is the reason a load of load_skill was refused, from the text
+// of its result.
+func refusedSkill(result llm.ToolResult) string {
+	var payload struct {
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+	if json.Unmarshal(result.Content, &payload) != nil || len(payload.Content) == 0 {
+		return "the skill was not loaded"
+	}
+	return payload.Content[0].Text
+}
+
+// SkillInfo is a skill the MCP serves to the user, as a client lists them
+// for the user to ask one: its name and its description, bounded.
+type SkillInfo struct {
+	Name        string
+	Description string
+}
 
 // SkillSession is an MCP session whose server serves skills. A session
 // without it, or a server without the extension, offers no load_skill.
@@ -65,7 +135,8 @@ type LoadedSkill struct {
 }
 
 // skillShelf holds the skills a turn may load and the tool that loads them;
-// none when the server serves no skill.
+// none when the server serves no skill. names are those the tool lists, the
+// model's; skills holds every skill served, which a client may ask.
 type skillShelf struct {
 	tool   *llm.Tool
 	names  []string
@@ -79,9 +150,12 @@ type skillShelf struct {
 // newSkillShelf lists the skills of the session for load_skill, at most
 // maxListedSkills, each named in its description by a line cut to
 // maxSkillSummaryBytes: the line is all the model sees of a skill until it
-// loads it. The name is the agent's: a tool of the MCP of the same name is
-// refused. A listing that fails leaves the turn without the tool.
-func newSkillShelf(ctx context.Context, session MCPSession, catalog map[string]llm.Tool) (*skillShelf, error) {
+// loads it. A skill the history loaded, as one the client asked beyond them,
+// is listed too, at most maxListedSkills more: the model loads it again to
+// read its procedure, which the history no longer keeps. The name is the
+// agent's: a tool of the MCP of the same name is refused. A listing that
+// fails leaves the turn without the tool.
+func newSkillShelf(ctx context.Context, session MCPSession, catalog map[string]llm.Tool, history []llm.Message) (*skillShelf, error) {
 	shelf := &skillShelf{skills: map[string]Skill{}, files: map[string]bool{}}
 	if _, taken := catalog[LoadSkillToolName]; taken {
 		return nil, fmt.Errorf("MCP tool %q conflicts with the skill loading of the agent", LoadSkillToolName)
@@ -95,22 +169,38 @@ func newSkillShelf(ctx context.Context, session MCPSession, catalog map[string]l
 		return shelf, nil
 	}
 	var lines []string
+	var unlisted []string
 	for _, skill := range skills {
 		// The files of every skill received leave read_resource, those of
 		// the skills the description does not list too.
 		for _, file := range skill.Files {
 			shelf.files[file.URI] = true
 		}
-		name, _ := skill.Frontmatter["name"].(string)
-		description, _ := skill.Frontmatter["description"].(string)
-		// The name is the last segment of the path of its SKILL.md, as the
-		// specification requires: a skill named otherwise is not listed.
-		if name == "" || description == "" || path.Base(path.Dir(skill.URI)) != name || shelf.skills[name].URI != "" || len(shelf.names) == maxListedSkills {
+		name, description, ok := listedSkill(skill)
+		if !ok || shelf.skills[name].URI != "" {
+			continue
+		}
+		shelf.skills[name] = skill
+		if len(shelf.names) == maxListedSkills {
+			unlisted = append(unlisted, name)
 			continue
 		}
 		shelf.names = append(shelf.names, name)
-		shelf.skills[name] = skill
 		lines = append(lines, name+": "+cutText(description, maxSkillSummaryBytes))
+	}
+	loaded := loadedSkills(history)
+	reloadable := 0
+	for _, name := range unlisted {
+		if reloadable == maxListedSkills {
+			break
+		}
+		if !loaded[name] {
+			continue
+		}
+		_, description, _ := listedSkill(shelf.skills[name])
+		shelf.names = append(shelf.names, name)
+		lines = append(lines, name+": "+cutText(description, maxSkillSummaryBytes))
+		reloadable++
 	}
 	if len(shelf.names) == 0 {
 		return shelf, nil
@@ -129,6 +219,88 @@ func newSkillShelf(ctx context.Context, session MCPSession, catalog map[string]l
 	return shelf, nil
 }
 
+// loadedSkills gives the names of the skills the history loaded, the loads
+// the agent refused left out.
+func loadedSkills(history []llm.Message) map[string]bool {
+	refused := map[string]bool{}
+	for _, message := range history {
+		for _, result := range message.ToolResults {
+			if result.IsError {
+				refused[result.CallID] = true
+			}
+		}
+	}
+	names := map[string]bool{}
+	for _, message := range history {
+		for _, call := range message.ToolCalls {
+			var arguments struct {
+				Skill string `json:"skill"`
+			}
+			if call.Name != LoadSkillToolName || refused[call.ID] || json.Unmarshal(call.Arguments, &arguments) != nil {
+				continue
+			}
+			names[arguments.Skill] = true
+		}
+	}
+	return names
+}
+
+// askable tells whether a client may ask skill: shaped as forwardedProps.skill
+// takes it, its SKILL.md in its manifest within the size a load reads.
+func askable(name string, skill Skill) bool {
+	index := slices.IndexFunc(skill.Files, func(file SkillFile) bool { return file.URI == skill.URI })
+	return ValidSkillName(name) && index >= 0 && skill.Files[index].Size <= maxSkillBytes
+}
+
+// listedSkill gives the name and the description of a skill the agent lists:
+// both given, the name the last segment of the path of its SKILL.md, as the
+// specification requires; a skill otherwise is not listed.
+func listedSkill(skill Skill) (name string, description string, ok bool) {
+	name, _ = skill.Frontmatter["name"].(string)
+	description, _ = skill.Frontmatter["description"].(string)
+	return name, description, name != "" && description != "" && path.Base(path.Dir(skill.URI)) == name
+}
+
+// Skills lists the skills the MCP serves to the user of ctx, as a client
+// offers them to be asked: those the agent lists, each once, their
+// description bounded as the model reads it, that a run may ask and a load
+// reads. A server without skills gives none.
+func (a *Agent) Skills(ctx context.Context) (skills []SkillInfo, err error) {
+	ctx, cancel := context.WithTimeout(ctx, min(a.config.Timeout, toolsTimeout))
+	defer cancel()
+	session, err := a.connectMCP(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("connect agent to MCP: %w", err)
+	}
+	defer func() {
+		if closeErr := session.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close agent MCP session: %w", closeErr))
+		}
+	}()
+	skills = []SkillInfo{}
+	lister, ok := session.(SkillSession)
+	if !ok {
+		return skills, nil
+	}
+	served, err := lister.ListSkills(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list agent MCP skills: %w", err)
+	}
+	seen := map[string]bool{}
+	for _, skill := range served {
+		name, description, ok := listedSkill(skill)
+		if !ok || seen[name] {
+			continue
+		}
+		seen[name] = true
+		if !askable(name, skill) {
+			continue
+		}
+		skills = append(skills, SkillInfo{Name: name, Description: cutText(description, maxSkillSummaryBytes)})
+	}
+	return skills, nil
+}
+
 // known tells whether a call loads a skill: any call of load_skill, the name
 // being the agent's.
 func (s *skillShelf) known(name string) bool {
@@ -144,18 +316,27 @@ func (s *skillShelf) known(name string) bool {
 // shown, in the place of the tools a search finds; those the backend does
 // not serve, such as actions it disables, are named to the model. A refused
 // load is a tool error for the model, never a failed turn.
-func (s *skillShelf) load(ctx context.Context, session MCPSession, backend string, call llm.ToolCall, selection *toolSelection) llm.ToolResult {
-	fail := func(message string) llm.ToolResult {
-		return llm.ToolResult{CallID: call.ID, Content: textToolResult(message), IsError: true}
+// asked, the load is the one the client asked: any skill served may be
+// loaded, not only those listed to the model. The error is that of a read of
+// the MCP that failed, the result then a refusal the model may read.
+func (s *skillShelf) load(ctx context.Context, session MCPSession, backend string, call llm.ToolCall, selection *toolSelection, asked bool) (llm.ToolResult, error) {
+	fail := func(message string) (llm.ToolResult, error) {
+		return llm.ToolResult{CallID: call.ID, Content: textToolResult(message), IsError: true}, nil
 	}
 	var arguments struct {
 		Skill string `json:"skill"`
 	}
-	if len(s.names) == 0 {
-		return fail("No skill of the backend can be loaded now: answer without it.")
-	}
-	if err := json.Unmarshal(call.Arguments, &arguments); err != nil || !slices.Contains(s.names, arguments.Skill) {
-		return fail("load_skill takes skill, one of the skills its description lists.")
+	if asked {
+		if err := json.Unmarshal(call.Arguments, &arguments); err != nil || s.skills[arguments.Skill].URI == "" {
+			return fail(fmt.Sprintf("The skill %s is not served to you now.", arguments.Skill))
+		}
+	} else {
+		if len(s.names) == 0 {
+			return fail("No skill of the backend can be loaded now: answer without it.")
+		}
+		if err := json.Unmarshal(call.Arguments, &arguments); err != nil || !slices.Contains(s.names, arguments.Skill) {
+			return fail("load_skill takes skill, one of the skills its description lists.")
+		}
 	}
 	skill := s.skills[arguments.Skill]
 	index := slices.IndexFunc(skill.Files, func(file SkillFile) bool { return file.URI == skill.URI })
@@ -167,7 +348,8 @@ func (s *skillShelf) load(ctx context.Context, session MCPSession, backend strin
 	}
 	result, err := session.ReadResource(ctx, skill.URI)
 	if err != nil {
-		return fail(fmt.Sprintf("The skill %s could not be read: %v", arguments.Skill, err))
+		refused, _ := fail(fmt.Sprintf("The skill %s could not be read: %v", arguments.Skill, err))
+		return refused, err
 	}
 	var text string
 	for _, contents := range result.Contents {
@@ -223,7 +405,7 @@ func (s *skillShelf) load(ctx context.Context, session MCPSession, backend strin
 	if len(missing) > 0 {
 		fmt.Fprintf(&intro, "Not served by this backend: %s; apply what the skill says of a missing tool. ", strings.Join(missing, ", "))
 	}
-	return llm.ToolResult{CallID: call.ID, Content: textToolResult(strings.TrimSpace(intro.String()) + "\n\n" + strings.TrimLeft(body, "\n"))}
+	return llm.ToolResult{CallID: call.ID, Content: textToolResult(strings.TrimSpace(intro.String()) + "\n\n" + strings.TrimLeft(body, "\n"))}, nil
 }
 
 // declaredTools gives the tools a skill names in its metadata, at most

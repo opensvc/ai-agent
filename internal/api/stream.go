@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"log/slog"
 	"math"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"github.com/opensvc/ai-agent/internal/agent"
 	"github.com/opensvc/ai-agent/internal/conversation"
 	"github.com/opensvc/ai-agent/internal/llm"
+	"github.com/opensvc/ai-agent/internal/requestid"
 )
 
 const (
@@ -319,6 +321,12 @@ func streamRun(response http.ResponseWriter, request *http.Request, audit auditL
 		} else if errors.Is(err, agent.ErrClientToolConflict) {
 			code = "tool_name_conflict"
 			message = "a tool of the client is named as a tool of the agent; rename it"
+		} else if errors.Is(err, agent.ErrSkillUnavailable) {
+			code = "skill_unavailable"
+			message = "the skill asked is not served to you now, or could not be loaded; GET /skills lists them"
+			// The cause in the server log, the skill no longer served or its
+			// file refused; the audit keeps the code only.
+			log.Printf("the skill asked is unavailable, request %s: %v", requestid.FromContext(request.Context()), err)
 		} else if errors.Is(err, conversation.ErrUserLimit) {
 			// The turn could not be stored: the quota of the user, or the
 			// room of the instance, rather than a failure of the agent.
@@ -356,6 +364,8 @@ func streamFailureCode(err error, completed bool, writeFailed bool, contextErr e
 			return "agent_cleanup_failed"
 		}
 		switch {
+		case errors.Is(err, agent.ErrSkillUnavailable):
+			return "skill_unavailable"
 		case errors.Is(err, conversation.ErrUserLimit):
 			return "conversation_quota"
 		case errors.Is(err, conversation.ErrLimit):

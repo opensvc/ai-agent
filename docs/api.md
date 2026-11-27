@@ -38,6 +38,7 @@ The routes of a backend, here `om3`; `oc3` has the same routes under
 | `GET /v1/om3/capabilities` | What the runs route can do, as an AG-UI `AgentCapabilities` |
 | `GET /v1/om3/models` | The models a run chooses from; see [Models](#models) |
 | `GET /v1/om3/tools` | The tools the assistant may call for the caller; see [Tools](#tools) |
+| `GET /v1/om3/skills` | The skills a run may ask for the caller; see [Skills](#skills) |
 | `PUT /v1/om3/conversations/{id}/turns/{turn_id}/feedback` | Give or replace the feedback on a turn |
 | `DELETE /v1/om3/conversations/{id}/turns/{turn_id}/feedback` | Withdraw it |
 
@@ -258,8 +259,9 @@ authentication headers of the backend:
   refused. The agent keeps its own history: the other messages are
   not read, so that a client cannot put words in the mouth of the assistant
   or of a tool, but the answers to the calls of its tools, below. Nor is
-  `state`; of `forwardedProps`, only `model`, the model of a new prompt:
-  see [Models](#models).
+  `state`; of `forwardedProps`, only `model`, the model of a new prompt
+  (see [Models](#models)), and `skill`, the skill it loads first (see
+  [Asked skills](#asked-skills)).
 - `context` is the context of the interface of a new prompt; see
   [Interface context](#interface-context).
 - `tools` are the tools of the client, which the agent offers to the model;
@@ -316,10 +318,10 @@ in milliseconds:
 | a client out of phase | `MESSAGES_SNAPSHOT` after `RUN_STARTED`; see below |
 | text of one model answer | `TEXT_MESSAGE_START` (`messageId` `<turn ID>:<2 × iteration>`, the ID the turn stores the answer with, role `assistant`), `TEXT_MESSAGE_CONTENT`, `TEXT_MESSAGE_END` before a tool call or the end |
 | tool call, of the MCP or of the agent | `TOOL_CALL_START` (`toolCallId`, `toolCallName`, `parentMessageId` the message of its answer), `TOOL_CALL_ARGS` with the JSON arguments whole, `TOOL_CALL_END` |
-| tool result | `TOOL_CALL_RESULT` with the JSON result, `{"content", "structuredContent", "isError"}`, `isError` `true` for a refusal of the MCP tool and `false` otherwise, or a note of its size beyond 64 KiB; see [Tool results](#tool-results) for what the model reads of it |
+| tool result | `TOOL_CALL_RESULT` with the JSON result, `{"content", "structuredContent", "isError"}`, `isError` `true` for a refusal of the MCP tool, or of a tool of the agent itself such as a `load_skill` refused, and `false` otherwise, or a note of its size beyond 64 KiB; see [Tool results](#tool-results) for what the model reads of it |
 | completion | `RUN_FINISHED`, `outcome` `{"type":"success"}`, `result` `{"turnId": …}` for the feedback |
 | confirmation | the call as a tool call, then `RUN_FINISHED`, `outcome` `interrupt` |
-| failure | `RUN_ERROR` with a `code`, `request_timeout`, `tool_name_conflict`, `conversation_quota` or `conversation_limit` (the turn could not be stored, see Quotas) or `agent_failed`, and a `message` for the developer |
+| failure | `RUN_ERROR` with a `code`, `request_timeout`, `tool_name_conflict`, `skill_unavailable` (see [Asked skills](#asked-skills)), `conversation_quota` or `conversation_limit` (the turn could not be stored, see Quotas) or `agent_failed`, and a `message` for the developer |
 
 `RUN_FINISHED` and `RUN_ERROR` carry `usage`, one `TokenUsage`
 `{inputTokens, outputTokens, totalTokens}` summing the model calls of the
@@ -524,8 +526,9 @@ route, for a client to shape its interface before a run: `transport`
 undeclared, `humanInTheLoop`
 `approvals`, `interrupts` and `approveWithEdits`, `multimodal` `input` text
 only, and `custom` `feedback`, always present: true, or false when the
-operator turned the [feedback](#feedback) off, and `models`, true: the runs
-choose their [model](#models). `HttpAgent` does not read it: a client
+operator turned the [feedback](#feedback) off, `models`, true: the runs
+choose their [model](#models), and `skills`, true: a run may ask a
+[skill](#asked-skills). `HttpAgent` does not read it: a client
 subclassing it implements `getCapabilities()` with it.
 
 ### Unattended runs
@@ -540,7 +543,11 @@ question or confirm an action, and nothing is stored.
   `invalid_prompt`). `context`, optional, scopes the question as for a
   conversation run, with the same bounds (`invalid_context`), and
   `forwardedProps.model`, optional, chooses its model, as for a new prompt
-  (`model_unknown`); see [Models](#models). `threadId` and `runId` are any IDs of the client, at
+  (`model_unknown`); see [Models](#models). `forwardedProps.skill`,
+  optional, has the agent load a skill first, as for a new prompt
+  (`invalid_skill`, `skill_unavailable`); see [Asked skills](#asked-skills):
+  the procedure a scheduled report follows, whatever the model chooses.
+  `threadId` and `runId` are any IDs of the client, at
   most 128 printable bytes: nothing is stored under them, and the audit
   carries `run_id`, with the `request_id` the response returns, to find the
   run in the logs of both sides.
@@ -829,6 +836,57 @@ neither by `load_skill` nor by `read_resource`, which leaves out the files
 of every skill listed. A server without the extension, or
 whose listing fails, leaves the turn without the tool; an MCP tool named
 `load_skill` fails the turn.
+
+### Asked skills
+
+A client may ask a skill for a new prompt, as the user picks it in the
+interface, rather than leave the model to choose one:
+`forwardedProps.skill`, the name of a skill.
+
+```json
+{"threadId": "...", "runId": "...", "messages": [...], "forwardedProps": {"skill": "morning-check"}}
+```
+
+- `GET /v1/{backend}/skills` lists the skills a run may ask, for the
+  caller: `{"skills": [{"name": "morning-check", "description": "..."}]}`,
+  those the MCP serves to the user, as its server publishes them to their
+  groups, each once, their description cut to 300 bytes, at most 32, in the
+  order of the MCP; none when the MCP serves no skill. A skill a run could
+  not ask, its name not shaped as one, or that a load would refuse, without
+  a `SKILL.md` of its own in its manifest or beyond 64 KiB, is left out. The
+  MCP unreachable gives 502 `skills_unavailable`; the answer is
+  `Cache-Control: no-store`, and the audit `skills_listed` carries the
+  count.
+- The name is lowercase letters, digits and hyphens, at most 64 bytes, as
+  the specification of Agent Skills gives it; another value, or one that is
+  not a string, is refused before the stream, 400 `invalid_skill`. Absent or
+  null, the run asks none. A resumed turn does not read it. The agent never
+  reads a skill from the text of the prompt: a prompt beginning with `/`,
+  such as `/etc/hosts is full`, is text.
+- The agent loads the skill itself, before the first request to the model,
+  with the checks of a load of the model: a call of `load_skill` the agent
+  makes, the first iteration of the turn, told to the client as a step
+  (`TOOL_CALL_START`, `TOOL_CALL_RESULT`) under the message of that
+  iteration, recorded in the run and kept in the history as any call. The
+  model is asked from the second iteration, within
+  `OPENSVC_AI_AGENT_MAX_ITERATIONS`: a turn of one iteration refuses a
+  skill. Any skill the MCP serves to the user may be asked, not only the 8
+  the description of `load_skill` lists to the model; its tools are then
+  listed, and in the next turns the description of `load_skill` lists it
+  too, at most 8 such skills, for the model to load it again and read its
+  procedure, which the history does not keep.
+- A skill not served to the user, or whose load is refused, by its size,
+  its digest or its frontmatter, fails the turn before the model is asked:
+  its step ends with an error result, then `RUN_ERROR` `skill_unavailable`,
+  and the server log tells why with the request ID. A read of the skill the
+  MCP fails is a failure of the MCP, `RUN_ERROR` `agent_failed` or
+  `request_timeout`. The prompt is not kept, and the model never answers
+  without the procedure the user chose. The audit of
+  `conversation_run_started` and `unattended_run_started` carries `skill`,
+  its name.
+- The prompt is required as for any run: a client sending a skill without
+  words sends a text of its own, such as `/morning-check`, which the user
+  sees as their message.
 
 A text read is a tool result: in the next turns, the history keeps no
 string longer than 256 bytes, so that a reference is read again in the

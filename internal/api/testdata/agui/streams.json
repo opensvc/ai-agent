@@ -100,6 +100,50 @@
     "body": "data: {\"type\":\"RUN_STARTED\",\"timestamp\":1760000000000,\"threadId\":\"conversation-id\",\"runId\":\"run-1\",\"protocolVersion\":\"1.0\"}\n\ndata: {\"type\":\"TOOL_CALL_RESULT\",\"timestamp\":1760000000000,\"messageId\":\"call-7-result\",\"role\":\"tool\",\"toolCallId\":\"call-7\",\"content\":\"{\\\"rejected\\\":true,\\\"message\\\":\\\"the user rejected this action; it did not run\\\"}\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_START\",\"timestamp\":1760000000000,\"messageId\":\"turn-c:4\",\"role\":\"assistant\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"timestamp\":1760000000000,\"messageId\":\"turn-c:4\",\"delta\":\"I did not apply it.\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_END\",\"timestamp\":1760000000000,\"messageId\":\"turn-c:4\"}\n\ndata: {\"type\":\"RUN_FINISHED\",\"timestamp\":1760000000000,\"threadId\":\"conversation-id\",\"runId\":\"run-1\",\"outcome\":{\"type\":\"success\"},\"result\":{\"turnId\":\"turn-c\"}}\n\n"
   },
   {
+    "name": "skill_asked",
+    "request": {
+      "threadId": "conversation-id",
+      "runId": "run-1",
+      "protocolVersion": "1.0",
+      "messages": [
+        {
+          "id": "u-s",
+          "role": "user",
+          "content": "/morning-check"
+        }
+      ],
+      "tools": [],
+      "forwardedProps": {
+        "skill": "morning-check"
+      }
+    },
+    "status": 200,
+    "contentType": "text/event-stream; charset=utf-8",
+    "body": "data: {\"type\":\"RUN_STARTED\",\"timestamp\":1760000000000,\"threadId\":\"conversation-id\",\"runId\":\"run-1\",\"protocolVersion\":\"1.0\"}\n\ndata: {\"type\":\"TOOL_CALL_START\",\"timestamp\":1760000000000,\"toolCallId\":\"call_skill_1\",\"toolCallName\":\"load_skill\",\"parentMessageId\":\"turn-s:2\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"timestamp\":1760000000000,\"delta\":\"{\\\"skill\\\":\\\"morning-check\\\"}\",\"toolCallId\":\"call_skill_1\"}\n\ndata: {\"type\":\"TOOL_CALL_END\",\"timestamp\":1760000000000,\"toolCallId\":\"call_skill_1\"}\n\ndata: {\"type\":\"TOOL_CALL_RESULT\",\"timestamp\":1760000000000,\"messageId\":\"call_skill_1-result\",\"role\":\"tool\",\"toolCallId\":\"call_skill_1\",\"content\":\"{\\\"content\\\":[{\\\"type\\\":\\\"text\\\",\\\"text\\\":\\\"Skill morning-check, loaded from the om3 backend; follow its procedure.\\\"}]}\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_START\",\"timestamp\":1760000000000,\"messageId\":\"turn-s:4\",\"role\":\"assistant\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"timestamp\":1760000000000,\"messageId\":\"turn-s:4\",\"delta\":\"The cluster is healthy.\"}\n\ndata: {\"type\":\"TEXT_MESSAGE_END\",\"timestamp\":1760000000000,\"messageId\":\"turn-s:4\"}\n\ndata: {\"type\":\"RUN_FINISHED\",\"timestamp\":1760000000000,\"threadId\":\"conversation-id\",\"runId\":\"run-1\",\"outcome\":{\"type\":\"success\"},\"result\":{\"turnId\":\"turn-s\"},\"usage\":[{\"inputTokens\":500,\"outputTokens\":25,\"totalTokens\":525}]}\n\n"
+  },
+  {
+    "name": "skill_unavailable",
+    "request": {
+      "threadId": "conversation-id",
+      "runId": "run-1",
+      "protocolVersion": "1.0",
+      "messages": [
+        {
+          "id": "u-u",
+          "role": "user",
+          "content": "/morning-check"
+        }
+      ],
+      "tools": [],
+      "forwardedProps": {
+        "skill": "morning-check"
+      }
+    },
+    "status": 200,
+    "contentType": "text/event-stream; charset=utf-8",
+    "body": "data: {\"type\":\"RUN_STARTED\",\"timestamp\":1760000000000,\"threadId\":\"conversation-id\",\"runId\":\"run-1\",\"protocolVersion\":\"1.0\"}\n\ndata: {\"type\":\"TOOL_CALL_START\",\"timestamp\":1760000000000,\"toolCallId\":\"call_skill_2\",\"toolCallName\":\"load_skill\",\"parentMessageId\":\"turn-u:2\"}\n\ndata: {\"type\":\"TOOL_CALL_ARGS\",\"timestamp\":1760000000000,\"delta\":\"{\\\"skill\\\":\\\"morning-check\\\"}\",\"toolCallId\":\"call_skill_2\"}\n\ndata: {\"type\":\"TOOL_CALL_END\",\"timestamp\":1760000000000,\"toolCallId\":\"call_skill_2\"}\n\ndata: {\"type\":\"TOOL_CALL_RESULT\",\"timestamp\":1760000000000,\"messageId\":\"call_skill_2-result\",\"role\":\"tool\",\"toolCallId\":\"call_skill_2\",\"content\":\"{\\\"content\\\":[{\\\"type\\\":\\\"text\\\",\\\"text\\\":\\\"The skill morning-check is not served to you now.\\\"}],\\\"isError\\\":true}\"}\n\ndata: {\"type\":\"RUN_ERROR\",\"timestamp\":1760000000000,\"message\":\"the skill asked is not served to you now, or could not be loaded; GET /skills lists them\",\"code\":\"skill_unavailable\"}\n\n"
+  },
+  {
     "name": "agent_failed",
     "request": {
       "threadId": "conversation-id",

@@ -284,7 +284,7 @@ func snapshotMessages(message llm.Message, id string) []SnapshotMessage {
 	case llm.RoleTool:
 		results := make([]SnapshotMessage, 0, len(message.ToolResults))
 		for _, result := range message.ToolResults {
-			content := toolResult(result.Content)
+			content := toolResult(result.Content, result.IsError)
 			results = append(results, SnapshotMessage{ID: result.CallID + "-result", Role: "tool", Content: &content, ToolCallID: result.CallID})
 		}
 		return results
@@ -340,7 +340,7 @@ func (e *Encoder) Encode(event agent.Event) ([]Event, error) {
 		}
 		return append(events, e.toolCall(event.ToolCallID, event.ToolName, event.ToolArguments, event.Iteration)...), nil
 	case agent.EventToolFinished:
-		content := toolResult(event.ToolResult)
+		content := toolResult(event.ToolResult, event.ToolError)
 		return []Event{e.stamp(Event{Type: ToolCallResult, MessageID: event.ToolCallID + "-result", ToolCallID: event.ToolCallID, Role: "tool", Content: &content})}, nil
 	case agent.EventToolCallsRefused:
 		// None of the calls ran: the client is shown none of them.
@@ -446,13 +446,30 @@ func (e *Encoder) Failure(code, message string) []Event {
 }
 
 // toolResult gives the result of a tool to the client, as the agent gave
-// it to the model, or a note of its size when it exceeds 64 KiB.
-func toolResult(result json.RawMessage) string {
+// it to the model, or a note of its size when it exceeds 64 KiB. A refusal
+// says isError true, as a refusal of an MCP tool does: the results of the
+// tools of the agent itself, such as a load_skill refused, carry none of
+// their own.
+func toolResult(result json.RawMessage, refused bool) string {
 	if len(result) == 0 {
+		if refused {
+			return `{"isError":true}`
+		}
 		return "{}"
 	}
 	if len(result) > maxToolResultBytes || !utf8.Valid(result) {
-		return fmt.Sprintf(`{"omitted":true,"bytes":%d,"message":"the result exceeds what the agent gives the client"}`, len(result))
+		return fmt.Sprintf(`{"omitted":true,"bytes":%d,"message":"the result exceeds what the agent gives the client"%s}`, len(result), map[bool]string{true: `,"isError":true`}[refused])
+	}
+	if refused {
+		var fields map[string]json.RawMessage
+		if json.Unmarshal(result, &fields) == nil && fields != nil {
+			if _, told := fields["isError"]; !told {
+				fields["isError"] = json.RawMessage("true")
+				if marked, err := json.Marshal(fields); err == nil {
+					return string(marked)
+				}
+			}
+		}
 	}
 	return string(result)
 }
