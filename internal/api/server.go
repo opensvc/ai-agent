@@ -47,6 +47,9 @@ type Backend struct {
 	// Tools lists the tools of the MCP of the backend, as the user; nil, the
 	// backend lists none.
 	Tools ToolLister
+	// Skills lists the skills the MCP of the backend serves to the user,
+	// those a run may ask; nil, the backend lists none.
+	Skills SkillLister
 	// Runner runs the unattended runs of the backend, on no conversation;
 	// nil, the backend serves none.
 	Runner UnattendedRunner
@@ -119,7 +122,7 @@ type backendRoute struct {
 	handler http.Handler
 }
 
-func backendRoutes(backend string, conversations ConversationService, tools ToolLister, runner UnattendedRunner, feedbackDisabled bool, models *llm.Models, limiter *askLimiter, audit auditLogger) []backendRoute {
+func backendRoutes(backend string, conversations ConversationService, tools ToolLister, skills SkillLister, runner UnattendedRunner, feedbackDisabled bool, models *llm.Models, limiter *askLimiter, audit auditLogger) []backendRoute {
 	var putFeedback, deleteFeedback http.HandlerFunc
 	if feedbackDisabled {
 		putFeedback, deleteFeedback = serveFeedbackDisabled(audit), serveFeedbackDisabled(audit)
@@ -138,6 +141,7 @@ func backendRoutes(backend string, conversations ConversationService, tools Tool
 		{"GET", "/capabilities", serveCapabilities(feedbackDisabled)},
 		{"GET", "/models", serveModels(models)},
 		{"GET", "/tools", serveTools(tools, audit)},
+		{"GET", "/skills", serveSkills(skills, audit)},
 		{"PUT", "/conversations/{id}/turns/{turn_id}/feedback", putFeedback},
 		{"DELETE", "/conversations/{id}/turns/{turn_id}/feedback", deleteFeedback},
 	}
@@ -145,7 +149,7 @@ func backendRoutes(backend string, conversations ConversationService, tools Tool
 
 func registerBackend(mux *http.ServeMux, backend Backend, feedbackDisabled bool, models *llm.Models, limiter *askLimiter, audit auditLogger) {
 	prefix := "/v1/" + backend.Name
-	for _, route := range backendRoutes(backend.Name, backend.Conversations, backend.Tools, backend.Runner, feedbackDisabled, models, limiter, audit) {
+	for _, route := range backendRoutes(backend.Name, backend.Conversations, backend.Tools, backend.Skills, backend.Runner, feedbackDisabled, models, limiter, audit) {
 		mux.Handle(route.method+" "+prefix+route.path, requireAccessToken(backend.Authenticator, audit, route.handler))
 	}
 }

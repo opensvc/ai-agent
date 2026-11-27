@@ -126,6 +126,35 @@ func TestGoldenAGUIStreams(t *testing.T) {
 			request: `{"threadId":"conversation-id","runId":"run-1","protocolVersion":"1.0","messages":[{"id":"u-c","role":"user"},{"id":"turn-c:2","role":"assistant"}],"tools":[],"resume":[{"interruptId":"confirmation-1","status":"resolved","payload":{"approved":false}}]}`,
 		},
 		{
+			// A skill the user asked, forwardedProps.skill: the agent loads it
+			// first, a step of the first iteration, the model answering from
+			// the second.
+			name: "skill_asked",
+			service: prompt(&testTurnExecution{turnID: "turn-s", run: emitEvents(
+				agent.Event{Type: agent.EventToolStarted, ToolName: "load_skill", ToolCallID: "call_skill_1", ToolArguments: json.RawMessage(`{"skill":"morning-check"}`), Iteration: 1},
+				agent.Event{Type: agent.EventToolFinished, ToolName: "load_skill", ToolCallID: "call_skill_1", ToolResult: json.RawMessage(`{"content":[{"type":"text","text":"Skill morning-check, loaded from the om3 backend; follow its procedure."}]}`), Iteration: 1},
+				agent.Event{Type: agent.EventTextDelta, TextDelta: "The cluster is healthy.", Iteration: 2},
+				usageEvent(500, 25),
+				agent.Event{Type: agent.EventCompleted, FinishReason: llm.FinishReasonCompleted, TurnID: "turn-s", Iteration: 2},
+			)}),
+			request: `{"threadId":"conversation-id","runId":"run-1","protocolVersion":"1.0","messages":[{"id":"u-s","role":"user","content":"/morning-check"}],"tools":[],"forwardedProps":{"skill":"morning-check"}}`,
+		},
+		{
+			// The skill asked is not served to the user: its step fails, then
+			// the run.
+			name: "skill_unavailable",
+			service: prompt(&testTurnExecution{turnID: "turn-u", run: func(_ context.Context, emit agent.EmitFunc) error {
+				if err := emit(agent.Event{Type: agent.EventToolStarted, ToolName: "load_skill", ToolCallID: "call_skill_2", ToolArguments: json.RawMessage(`{"skill":"morning-check"}`), Iteration: 1}); err != nil {
+					return err
+				}
+				if err := emit(agent.Event{Type: agent.EventToolFinished, ToolName: "load_skill", ToolCallID: "call_skill_2", ToolError: true, ToolResult: json.RawMessage(`{"content":[{"type":"text","text":"The skill morning-check is not served to you now."}]}`), Iteration: 1}); err != nil {
+					return err
+				}
+				return fmt.Errorf("%w: The skill morning-check is not served to you now.", agent.ErrSkillUnavailable)
+			}}),
+			request: `{"threadId":"conversation-id","runId":"run-1","protocolVersion":"1.0","messages":[{"id":"u-u","role":"user","content":"/morning-check"}],"tools":[],"forwardedProps":{"skill":"morning-check"}}`,
+		},
+		{
 			name: "agent_failed",
 			service: prompt(&testTurnExecution{turnID: "turn-f", run: func(context.Context, agent.EmitFunc) error {
 				return errors.New("the model provider failed")

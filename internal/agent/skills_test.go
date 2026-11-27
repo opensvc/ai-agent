@@ -35,6 +35,9 @@ func skillSession(text string, frontmatter map[string]any) *fakeSession {
 	}
 }
 
+// loadResult is the result of a load, its read of the MCP not failing.
+func loadResult(result llm.ToolResult, _ error) llm.ToolResult { return result }
+
 func maintenanceFrontmatter() map[string]any {
 	return map[string]any{
 		"name": "node-maintenance", "description": "Use when the user plans to reboot a node.",
@@ -139,8 +142,8 @@ func TestLoadSkillRefusesWhatDiffersFromTheListing(t *testing.T) {
 // most maxListedSkills skills, each line cut; a tool of the MCP named
 // load_skill is refused.
 func TestLoadSkillBoundsItsDescription(t *testing.T) {
-	empty, err := newSkillShelf(t.Context(), &fakeSession{}, map[string]llm.Tool{})
-	if err != nil || empty.tool != nil || empty.load(t.Context(), &fakeSession{}, "", llm.ToolCall{ID: "call-1", Name: LoadSkillToolName, Arguments: json.RawMessage(`{"skill":"a"}`)}, &toolSelection{}).IsError != true {
+	empty, err := newSkillShelf(t.Context(), &fakeSession{}, map[string]llm.Tool{}, nil)
+	if err != nil || empty.tool != nil || !loadResult(empty.load(t.Context(), &fakeSession{}, "", llm.ToolCall{ID: "call-1", Name: LoadSkillToolName, Arguments: json.RawMessage(`{"skill":"a"}`)}, &toolSelection{}, false)).IsError {
 		t.Fatalf("empty shelf = %+v, %v", empty, err)
 	}
 	session := &fakeSession{}
@@ -148,11 +151,11 @@ func TestLoadSkillBoundsItsDescription(t *testing.T) {
 		name := "skill-" + strconv.Itoa(index)
 		session.skills = append(session.skills, Skill{URI: "skill://" + name + "/SKILL.md", Frontmatter: map[string]any{"name": name, "description": strings.Repeat("d", 2*maxSkillSummaryBytes)}})
 	}
-	shelf, err := newSkillShelf(t.Context(), session, map[string]llm.Tool{})
+	shelf, err := newSkillShelf(t.Context(), session, map[string]llm.Tool{}, nil)
 	if err != nil || shelf.tool == nil || len(shelf.names) != maxListedSkills || strings.Contains(shelf.tool.Description, strings.Repeat("d", maxSkillSummaryBytes+1)) {
 		t.Fatalf("shelf = %+v, %v", shelf, err)
 	}
-	if _, err := newSkillShelf(t.Context(), session, map[string]llm.Tool{LoadSkillToolName: {Name: LoadSkillToolName}}); err == nil {
+	if _, err := newSkillShelf(t.Context(), session, map[string]llm.Tool{LoadSkillToolName: {Name: LoadSkillToolName}}, nil); err == nil {
 		t.Fatal("an MCP tool named load_skill was accepted")
 	}
 }
@@ -162,12 +165,12 @@ func TestLoadSkillBoundsItsDescription(t *testing.T) {
 // SKILL.md with CRLF line ends loads.
 func TestLoadSkillNamesItsBackendAndItsErrors(t *testing.T) {
 	load := func(session *fakeSession) llm.ToolResult {
-		shelf, err := newSkillShelf(t.Context(), session, map[string]llm.Tool{})
+		shelf, err := newSkillShelf(t.Context(), session, map[string]llm.Tool{}, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
 		selection := &toolSelection{catalog: map[string]llm.Tool{"list_node_packages": {Name: "list_node_packages"}}}
-		return shelf.load(t.Context(), session, "om3", llm.ToolCall{ID: "call-1", Name: LoadSkillToolName, Arguments: json.RawMessage(`{"skill":"node-maintenance"}`)}, selection)
+		return loadResult(shelf.load(t.Context(), session, "om3", llm.ToolCall{ID: "call-1", Name: LoadSkillToolName, Arguments: json.RawMessage(`{"skill":"node-maintenance"}`)}, selection, false))
 	}
 	if result := load(skillSession(maintenanceSkill, maintenanceFrontmatter())); result.IsError || !strings.Contains(string(result.Content), "loaded from the om3 backend") || strings.Contains(string(result.Content), "test-mcp") {
 		t.Fatalf("load = %s", result.Content)
@@ -189,11 +192,11 @@ func TestLoadSkillNamesItsBackendAndItsErrors(t *testing.T) {
 func TestLoadSkillRefusesALargeSkillBeforeReadingIt(t *testing.T) {
 	session := skillSession(maintenanceSkill, maintenanceFrontmatter())
 	session.skills[0].Files[0].Size = maxSkillBytes + 1
-	shelf, err := newSkillShelf(t.Context(), session, map[string]llm.Tool{})
+	shelf, err := newSkillShelf(t.Context(), session, map[string]llm.Tool{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	result := shelf.load(t.Context(), session, "om3", llm.ToolCall{ID: "call-1", Name: LoadSkillToolName, Arguments: json.RawMessage(`{"skill":"node-maintenance"}`)}, &toolSelection{})
+	result := loadResult(shelf.load(t.Context(), session, "om3", llm.ToolCall{ID: "call-1", Name: LoadSkillToolName, Arguments: json.RawMessage(`{"skill":"node-maintenance"}`)}, &toolSelection{}, false))
 	if !result.IsError || len(session.reads) != 0 {
 		t.Fatalf("load = %s, reads %v", result.Content, session.reads)
 	}
@@ -209,7 +212,7 @@ func TestSkillShelfChecksNamesAndKeepsEveryFile(t *testing.T) {
 		session.skills = append(session.skills, Skill{URI: "skill://" + name + "/SKILL.md", Frontmatter: map[string]any{"name": name, "description": "d"}, Files: []SkillFile{{URI: "skill://" + name + "/SKILL.md"}}})
 	}
 	session.skills = append(session.skills, Skill{URI: "skill://other/SKILL.md", Frontmatter: map[string]any{"name": "liar", "description": "d"}, Files: []SkillFile{{URI: "skill://other/SKILL.md"}}})
-	shelf, err := newSkillShelf(t.Context(), session, map[string]llm.Tool{})
+	shelf, err := newSkillShelf(t.Context(), session, map[string]llm.Tool{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

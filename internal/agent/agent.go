@@ -154,7 +154,22 @@ func (a *Agent) RunTurn(ctx context.Context, history []llm.Message, prompt strin
 	if err != nil {
 		return result, err
 	}
-	return a.run(ctx, history, &SuspendedTurn{Messages: []llm.Message{{Role: llm.RoleUser, Text: prompt}}, InterfaceContext: interfaceContext, ModelID: model.ID}, model, "", emit)
+	state := &SuspendedTurn{Messages: []llm.Message{{Role: llm.RoleUser, Text: prompt}}, InterfaceContext: interfaceContext, ModelID: model.ID}
+	// The skill the client asked is loaded first, by the agent, before the
+	// model is asked: the call of the first iteration of the turn, as a call
+	// of the model would be, the model asked from the second.
+	asked := ""
+	if skill := SkillFrom(ctx); skill != "" {
+		if !ValidSkillName(skill) {
+			return result, fmt.Errorf("%w: %q is not shaped as the name of a skill", ErrSkillUnavailable, skill)
+		}
+		if a.config.MaxIterations < 2 {
+			return result, fmt.Errorf("%w: the turn allows %d iteration, none left to the model after the skill", ErrSkillUnavailable, a.config.MaxIterations)
+		}
+		call := askedSkillCall(skill)
+		state.Calls, state.Iteration, asked = []llm.ToolCall{call}, 1, call.ID
+	}
+	return a.run(ctx, history, state, model, "", asked, emit)
 }
 
 // ResumeTurn continues a suspended turn with the decision of the user on its
@@ -182,13 +197,15 @@ func (a *Agent) ResumeTurn(ctx context.Context, history []llm.Message, suspended
 		return result, err
 	}
 	state.ModelID = model.ID
-	return a.run(ctx, history, &state, model, decision, emit)
+	return a.run(ctx, history, &state, model, decision, "", emit)
 }
 
 // run drives the turn held by state until the model answers, or until a tool
 // call requires a confirmation. decision applies to the first call left to
-// run, the one a suspended turn waits on.
-func (a *Agent) run(ctx context.Context, history []llm.Message, state *SuspendedTurn, model llm.Model, decision Decision, consume EmitFunc) (result TurnResult, err error) {
+// run, the one a suspended turn waits on. asked is the ID of the call of
+// load_skill the agent makes for the skill the client asked, the first of a
+// new turn; empty for none.
+func (a *Agent) run(ctx context.Context, history []llm.Message, state *SuspendedTurn, model llm.Model, decision Decision, asked string, consume EmitFunc) (result TurnResult, err error) {
 	// The model is told with a failure too: the run of a turn records it.
 	result.Model = TurnModel{ID: model.ID, Name: model.Name}
 	if consume == nil {
@@ -268,7 +285,7 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 	// The skills of the MCP are loaded with load_skill, and its resources
 	// read with read_resource, each offered in every request of the turn
 	// when the server has some. The files of the skills are load_skill's.
-	skills, err := newSkillShelf(ctx, session, selection.catalog)
+	skills, err := newSkillShelf(ctx, session, selection.catalog, history)
 	if err != nil {
 		return result, err
 	}
@@ -399,10 +416,25 @@ func (a *Agent) run(ctx context.Context, history []llm.Message, state *Suspended
 				return true, nil
 			}
 			if skills.known(call.Name) {
+				// The load the client asked, before the first request to the
+				// model, takes any skill served; refused, it ends the turn,
+				// told as a step that failed, rather than let the model answer
+				// without it. A read of the MCP that fails stops it as a
+				// failure of the MCP.
+				askedLoad := asked != "" && call.ID == asked
 				if err := emitAgentEvent(emit, Event{Type: EventToolStarted, ToolName: call.Name, ToolCallID: call.ID, ToolArguments: call.Arguments, Iteration: state.Iteration}); err != nil {
 					return false, err
 				}
-				loadResult := skills.load(ctx, session, a.config.Backend, call, selection)
+				loadResult, readErr := skills.load(ctx, session, a.config.Backend, call, selection, askedLoad)
+				if askedLoad && loadResult.IsError {
+					if err := emitAgentEvent(emit, Event{Type: EventToolFinished, ToolName: call.Name, ToolError: true, ToolCallID: call.ID, ToolResult: loadResult.Content, Iteration: state.Iteration}); err != nil {
+						return false, err
+					}
+					if readErr != nil {
+						return false, fmt.Errorf("read the skill asked: %w", readErr)
+					}
+					return false, fmt.Errorf("%w: %s", ErrSkillUnavailable, refusedSkill(loadResult))
+				}
 				// The tools a skill showed stay shown when the turn resumes.
 				if selection.search {
 					state.ActiveTools, state.FoundTools = slices.Clone(selection.active), slices.Clone(selection.found)

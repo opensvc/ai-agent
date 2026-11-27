@@ -35,6 +35,10 @@
     {
       "name": "tools",
       "description": "The tools the assistant may call."
+    },
+    {
+      "name": "skills",
+      "description": "The skills of the MCP a run may ask the agent to load first."
     }
   ],
   "paths": {
@@ -783,7 +787,7 @@
               "text/event-stream": {
                 "schema": {
                   "type": "string",
-                  "description": "Server-sent events of the AG-UI protocol: each event is written as `data: <event JSON>`, followed by an empty line, without an event name. The run starts with RUN_STARTED and ends with RUN_FINISHED, whose outcome is success or an interrupt for a confirmation, or RUN_ERROR. A RUN_ERROR carries a code: `request_timeout`, `tool_name_conflict`, `conversation_quota` or `conversation_limit` when the turn could not be stored, or `agent_failed`."
+                  "description": "Server-sent events of the AG-UI protocol: each event is written as `data: <event JSON>`, followed by an empty line, without an event name. The run starts with RUN_STARTED and ends with RUN_FINISHED, whose outcome is success or an interrupt for a confirmation, or RUN_ERROR. A RUN_ERROR carries a code: `request_timeout`, `tool_name_conflict`, `skill_unavailable` when the skill asked is not served or not loaded, `conversation_quota` or `conversation_limit` when the turn could not be stored, or `agent_failed`."
                 }
               }
             }
@@ -795,7 +799,7 @@
             "$ref": "#/components/responses/AuthenticationUnavailable"
           },
           "400": {
-            "description": "The body is not a RunAgentInput, its threadId is not the conversation, its runId is invalid, the tools of the client are invalid, the tool messages do not answer the calls waiting, the last message is not a text of the user, or the resume is invalid, or the context of the interface is invalid, or the model of a new turn is not one of the agent. Codes: `invalid_request`, `invalid_protocol_version`, `unsupported_protocol_version`, `thread_mismatch`, `invalid_run_id`, `invalid_tools`, `invalid_tool_results`, `invalid_prompt`, `invalid_decision`, `invalid_edited_arguments`, `invalid_context`, `model_unknown`.",
+            "description": "The body is not a RunAgentInput, its threadId is not the conversation, its runId is invalid, the tools of the client are invalid, the tool messages do not answer the calls waiting, the last message is not a text of the user, or the resume is invalid, or the context of the interface is invalid, or the model of a new turn is not one of the agent, or its skill is not shaped as the name of a skill. Codes: `invalid_request`, `invalid_protocol_version`, `unsupported_protocol_version`, `thread_mismatch`, `invalid_run_id`, `invalid_tools`, `invalid_tool_results`, `invalid_prompt`, `invalid_decision`, `invalid_edited_arguments`, `invalid_context`, `model_unknown`, `invalid_skill`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -905,7 +909,7 @@
               "text/event-stream": {
                 "schema": {
                   "type": "string",
-                  "description": "Server-sent events of the AG-UI protocol, as for a conversation run. The run starts with RUN_STARTED and ends with RUN_FINISHED, whose outcome is success and whose result is an UnattendedSummary, or RUN_ERROR. A RUN_ERROR carries a code: `request_timeout` or `agent_failed`."
+                  "description": "Server-sent events of the AG-UI protocol, as for a conversation run. The run starts with RUN_STARTED and ends with RUN_FINISHED, whose outcome is success and whose result is an UnattendedSummary, or RUN_ERROR. A RUN_ERROR carries a code: `request_timeout`, `skill_unavailable` when the skill asked is not served or not loaded, or `agent_failed`."
                 }
               }
             }
@@ -917,7 +921,7 @@
             "$ref": "#/components/responses/AuthenticationUnavailable"
           },
           "400": {
-            "description": "The body is not a RunAgentInput, its runId or threadId is invalid, it offers tools of the client, it resumes, it does not hold exactly one message of the user with text, or its context is invalid, or its model is not one of the agent. Codes: `invalid_request`, `invalid_protocol_version`, `unsupported_protocol_version`, `invalid_run_id`, `invalid_thread_id`, `invalid_tools`, `invalid_decision`, `invalid_prompt`, `invalid_context`, `model_unknown`.",
+            "description": "The body is not a RunAgentInput, its runId or threadId is invalid, it offers tools of the client, it resumes, it does not hold exactly one message of the user with text, or its context is invalid, or its model is not one of the agent, or its skill is not shaped as the name of a skill. Codes: `invalid_request`, `invalid_protocol_version`, `unsupported_protocol_version`, `invalid_run_id`, `invalid_thread_id`, `invalid_tools`, `invalid_decision`, `invalid_prompt`, `invalid_context`, `model_unknown`, `invalid_skill`.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1092,6 +1096,64 @@
           },
           "502": {
             "description": "The tools of the MCP could not be read: tools_unavailable.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "$ref": "#/components/responses/AuthenticationUnavailable"
+          }
+        }
+      }
+    },
+    "/v1/{backend}/skills": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/Backend"
+        },
+        {
+          "$ref": "#/components/parameters/ClusterID"
+        },
+        {
+          "$ref": "#/components/parameters/Node"
+        }
+      ],
+      "get": {
+        "operationId": "listSkills",
+        "tags": [
+          "skills"
+        ],
+        "summary": "The skills the MCP of the backend serves to the caller, as its server publishes them to the groups of the user: those a run may ask in `forwardedProps.skill`, each by its name, the last segment of the path of its `SKILL.md`, with its description cut to 300 bytes, at most 32. None when the MCP serves no skill.",
+        "responses": {
+          "200": {
+            "description": "The skills, in the order of the MCP.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SkillList"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "description": "The backend lists no skills.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The skills of the MCP could not be read: skills_unavailable.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1762,7 +1824,7 @@
             "description": "The version of AG-UI the client speaks, MAJOR.MINOR: a newer minor of the line 1 is served with a warning, another major line refused."
           },
           "forwardedProps": {
-            "description": "Properties for the agent, read when an object. `model`, the ID of a model `GET /v1/{backend}/models` lists, chooses the model a new turn runs on, from its start to its end; absent, null, or with no `forwardedProps` object, the default model. A resumed turn keeps the model it started on, or runs on the default when the operator removed it, and the `model` of its run is not read. Other members are ignored.",
+            "description": "Properties for the agent, read when an object. `model`, the ID of a model `GET /v1/{backend}/models` lists, chooses the model a new turn runs on, from its start to its end; absent, null, or with no `forwardedProps` object, the default model. A resumed turn keeps the model it started on, or runs on the default when the operator removed it, and the `model` of its run is not read. `skill`, the name of a skill `GET /v1/{backend}/skills` lists, has the agent load that skill first, before the model is asked, as a step told and kept as any call of `load_skill`: any skill served to the user, not only those listed to the model; one not served, or whose load is refused, fails the turn with `skill_unavailable`. A resumed turn does not read it. Other members are ignored.",
             "properties": {
               "model": {
                 "type": [
@@ -1771,6 +1833,15 @@
                 ],
                 "minLength": 1,
                 "maxLength": 64
+              },
+              "skill": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$"
               }
             }
           }
@@ -1779,7 +1850,7 @@
       },
       "AgentCapabilities": {
         "type": "object",
-        "description": "The AG-UI AgentCapabilities of the agent: identity, transport, tools, humanInTheLoop and multimodal groups, and custom: `feedback`, always present, true, or false when the operator turned the feedback off; `models`, true: the runs choose their model, in `forwardedProps.model`, among those of `GET /v1/{backend}/models`. An agent without `models` offers no choice.",
+        "description": "The AG-UI AgentCapabilities of the agent: identity, transport, tools, humanInTheLoop and multimodal groups, and custom: `feedback`, always present, true, or false when the operator turned the feedback off; `models`, true: the runs choose their model, in `forwardedProps.model`, among those of `GET /v1/{backend}/models`. An agent without `models` offers no choice. `skills`, true: a run may ask a skill, in `forwardedProps.skill`, among those of `GET /v1/{backend}/skills`.",
         "additionalProperties": true
       },
       "ModelList": {
@@ -1959,6 +2030,40 @@
           }
         }
       },
+      "SkillList": {
+        "type": "object",
+        "required": [
+          "skills"
+        ],
+        "properties": {
+          "skills": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "$ref": "#/components/schemas/Skill"
+            }
+          }
+        }
+      },
+      "Skill": {
+        "type": "object",
+        "required": [
+          "name",
+          "description"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$",
+            "description": "The name of the skill, as `forwardedProps.skill` takes it."
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 300,
+            "description": "What the skill is for, as its server describes it, cut to 300 bytes."
+          }
+        }
+      },
       "UnattendedRunInput": {
         "type": "object",
         "description": "The AG-UI RunAgentInput of an unattended run: threadId and runId name the run for the client and the audit, nothing is stored under them; messages holds one message of the user; tools must be empty or absent, resume absent; context, optional, scopes the question as for a conversation run, and forwardedProps.model, optional, chooses its model. The other members are not read.",
@@ -2032,7 +2137,7 @@
             "maxItems": 0
           },
           "forwardedProps": {
-            "description": "Properties for the agent, read when an object: `model`, the ID of a model `GET /v1/{backend}/models` lists, chooses the model of the run; absent, the default model. Other members are ignored.",
+            "description": "Properties for the agent, read when an object: `model`, the ID of a model `GET /v1/{backend}/models` lists, chooses the model of the run; absent, the default model. `skill`, the name of a skill `GET /v1/{backend}/skills` lists, has the agent load that skill first, before the model is asked; one not served, or whose load is refused, fails the run with `skill_unavailable`. Other members are ignored.",
             "properties": {
               "model": {
                 "type": [
@@ -2041,6 +2146,15 @@
                 ],
                 "minLength": 1,
                 "maxLength": 64
+              },
+              "skill": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "minLength": 1,
+                "maxLength": 64,
+                "pattern": "^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$"
               }
             }
           }

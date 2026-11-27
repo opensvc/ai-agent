@@ -80,6 +80,26 @@ func (input RunAgentInput) Model() (string, error) {
 	return id, nil
 }
 
+// Skill gives the name of the skill the client asked the new turn to load
+// first, in the skill member of the forwarded properties: empty for none,
+// when the properties are absent, not an object, or without a skill. A skill
+// that is not a string shaped as the name of a skill is an error.
+func (input RunAgentInput) Skill() (string, error) {
+	var props map[string]json.RawMessage
+	if json.Unmarshal(input.ForwardedProps, &props) != nil {
+		return "", nil
+	}
+	raw, ok := props["skill"]
+	if !ok || bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return "", nil
+	}
+	var name string
+	if err := json.Unmarshal(raw, &name); err != nil || !agent.ValidSkillName(name) {
+		return "", fmt.Errorf("forwardedProps.skill must be the name of a skill, lowercase letters, digits and hyphens, at most %d bytes; GET /skills lists them", agent.MaxSkillNameBytes)
+	}
+	return name, nil
+}
+
 // InterfaceContext gives the context of the input, AG-UI Context entries
 // {description, value}: what the interface of the user shows, such as the
 // page and the record open on it. Absent, null or empty, there is none.
