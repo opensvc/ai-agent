@@ -217,7 +217,9 @@ type serviceTestStore struct {
 	messageQuery      MessageQuery
 	messageReads      int
 	suspended         *PendingConfirmation
-	promptID          string
+	// turnRuns are the runs of the turn suspended, as the store keeps them.
+	turnRuns []TurnRun
+	promptID string
 }
 
 func newServiceTestStore() *serviceTestStore {
@@ -304,6 +306,10 @@ func (s *serviceTestStore) DeleteExpired(context.Context, time.Time, int) (int64
 }
 func (s *serviceTestStore) Close() error { return nil }
 func (s *serviceTestStore) TurnMessages(context.Context, Owner, string, string) (Turn, []llm.Message, error) {
+	// The runs a suspended turn recorded, as the store keeps them with it.
+	if s.turnRuns != nil {
+		return Turn{Runs: s.turnRuns}, nil, nil
+	}
 	return Turn{}, nil, ErrNotFound
 }
 func (s *serviceTestStore) PutFeedback(context.Context, Owner, string, FeedbackRecord) (FeedbackRecord, error) {
@@ -322,6 +328,7 @@ func (s *serviceTestStore) DeleteExpiredFeedback(context.Context, time.Time, int
 
 func (s *serviceTestStore) SuspendTurn(_ context.Context, _ Owner, pending PendingConfirmation) error {
 	s.suspended = &pending
+	s.turnRuns = append(s.turnRuns, pending.Run)
 	return nil
 }
 

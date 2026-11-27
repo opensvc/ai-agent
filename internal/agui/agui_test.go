@@ -295,7 +295,7 @@ func TestEncoderSnapshotsTheThread(t *testing.T) {
 	}
 	ids := []string{"t-1:1", "t-1:2", "t-1:3", "t-1:4"}
 	prompt := "and services?"
-	events, err := NewEncoder("c-1", "r-2").Snapshot(history, ids, &SnapshotMessage{ID: "client-7", Role: "user", Content: &prompt}, 0)
+	events, err := NewEncoder("c-1", "r-2").Snapshot(history, ids, &SnapshotMessage{ID: "client-7", Role: "user", Content: &prompt}, 0, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -312,7 +312,7 @@ func TestEncoderSnapshotsTheThread(t *testing.T) {
 	// Beyond 1 MiB the oldest turns are left out, and counted.
 	large := strings.Repeat("a", maxSnapshotBytes)
 	events, err = NewEncoder("c-1", "r-2").Snapshot([]llm.Message{{Role: llm.RoleUser, Text: large}, {Role: llm.RoleAssistant, Text: "ok"}, {Role: llm.RoleUser, Text: "next"}, {Role: llm.RoleAssistant, Text: "fine"}},
-		[]string{"t-0:1", "t-0:2", "t-1:1", "t-1:2"}, nil, 2)
+		[]string{"t-0:1", "t-0:2", "t-1:1", "t-1:2"}, nil, 2, nil)
 	if err != nil || len(*events[0].Messages) != 2 || (*events[0].Messages)[0].ID != "t-1:1" || events[0].Metadata["opensvc.truncated"].(map[string]int)["omittedTurns"] != 3 {
 		t.Fatalf("truncated snapshot = %+v, %v", events, err)
 	}
@@ -351,5 +351,33 @@ func TestEncoderStampsTheTimeOfTheAgent(t *testing.T) {
 	unstamped, _ := encoder.Encode(agent.Event{Type: agent.EventToolFinished, ToolName: "list_nodes", ToolCallID: "call-1", Iteration: 1})
 	if unstamped[0].Timestamp != 5 {
 		t.Fatalf("unstamped = %d", unstamped[0].Timestamp)
+	}
+}
+
+// A message of the user names the skill it asked, as the history does: the
+// one a run starts from, and those the skills name by their ID; none other.
+func TestEncoderSnapshotNamesTheSkillsAsked(t *testing.T) {
+	history := []llm.Message{
+		{Role: llm.RoleUser, Text: "on n1"},
+		{Role: llm.RoleAssistant, Text: "Done."},
+		{Role: llm.RoleUser, Text: "and n2"},
+		{Role: llm.RoleAssistant, Text: "Done."},
+	}
+	prompt := "then n3"
+	events, err := NewEncoder("c-1", "r-2").Snapshot(history, []string{"t-1:1", "t-1:2", "t-2:1", "t-2:2"},
+		&SnapshotMessage{ID: "client-7", Role: "user", Content: &prompt, Skill: "morning-check"}, 0, map[string]string{"t-2:1": "node-maintenance", "t-1:2": "ignored"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var skills []string
+	for _, message := range *events[0].Messages {
+		skills = append(skills, message.ID+"="+message.Skill)
+	}
+	if got := strings.Join(skills, ","); got != "t-1:1=,t-1:2=,t-2:1=node-maintenance,t-2:2=,client-7=morning-check" {
+		t.Fatalf("skills = %s", got)
+	}
+	encoded, _ := json.Marshal(events[0])
+	if strings.Count(string(encoded), `"skill"`) != 2 {
+		t.Fatalf("a message names a skill it did not ask: %s", encoded)
 	}
 }

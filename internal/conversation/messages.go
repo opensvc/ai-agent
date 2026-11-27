@@ -44,6 +44,10 @@ type DisplayMessage struct {
 	// ModelID is the ID of the model the turn last ran on, for the client to
 	// offer it again; absent for a turn recorded before runs had it.
 	ModelID string `json:"model_id,omitempty"`
+	// Skill is, on the message of the user that starts a turn, the name of
+	// the skill the client asked with it, which the agent loaded first;
+	// absent when it asked none, or for a turn recorded before runs had it.
+	Skill string `json:"skill,omitempty"`
 }
 
 // DisplayStep is one call of a tool of a turn, as the stream showed it:

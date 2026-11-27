@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -334,6 +335,91 @@ func TestDisplayMessagesServeTheStepsOfATurnCutByTheCursorOnce(t *testing.T) {
 	older, err := store.ListMessages(t.Context(), testOwner, item.ID, conversation.MessageQuery{Before: page.NextCursor})
 	if err != nil || len(older.Messages) != 2 || older.Messages[1].Text != "I check it." || older.Messages[1].Steps != nil || older.Messages[1].Runs != nil {
 		t.Fatalf("older = %+v, %v", older, err)
+	}
+}
+
+// The prompt of a turn names the skill the client asked with it, the first
+// run's; not a skill the model loaded, nor a turn that asked none.
+func TestDisplayMessagesServeTheSkillAskedOfATurn(t *testing.T) {
+	store, _ := openTestStore(t, Config{})
+	item := testConversation("conversation-1", testOwner, testNow)
+	if err := store.CreateConversation(t.Context(), item); err != nil {
+		t.Fatal(err)
+	}
+	loaded := conversation.RunSkill{Name: "morning-check", URI: "skill://morning-check/SKILL.md", SHA256: "sha256:00"}
+	asked := conversation.RunSkill{Name: "node-maintenance", URI: "skill://node-maintenance/SKILL.md", SHA256: "sha256:01", Asked: true}
+	for index, run := range []conversation.TurnRun{{Model: "m"}, {Model: "m", Skills: []conversation.RunSkill{loaded}}, {Model: "m", Skills: []conversation.RunSkill{asked, loaded}}} {
+		turnID := fmt.Sprintf("turn-%d", index+1)
+		at := testNow.Add(time.Duration(index+1) * time.Minute)
+		if _, err := store.BeginTurn(t.Context(), testOwner, item.ID, turnID, at); err != nil {
+			t.Fatal(err)
+		}
+		messages := []llm.Message{{Role: llm.RoleUser, Text: "on n1"}, {Role: llm.RoleAssistant, Text: "done"}}
+		if err := store.CompleteTurn(t.Context(), testOwner, item.ID, turnID, at.Add(time.Second), at.Add(time.Hour), messages, run, conversation.TurnTiming{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	page, err := store.ListMessages(t.Context(), testOwner, item.ID, conversation.MessageQuery{})
+	if err != nil || len(page.Messages) != 6 {
+		t.Fatalf("page = %+v, %v", page, err)
+	}
+	var skills []string
+	for _, message := range page.Messages {
+		skills = append(skills, message.Role+":"+message.Skill)
+	}
+	if want := []string{"user:", "assistant:", "user:", "assistant:", "user:node-maintenance", "assistant:"}; !slices.Equal(skills, want) {
+		t.Fatalf("skills = %q, want %q", skills, want)
+	}
+	encoded, _ := json.Marshal(page.Messages[2])
+	if strings.Contains(string(encoded), `"skill"`) {
+		t.Fatalf("a prompt that asked no skill names one: %s", encoded)
+	}
+	// A page cut between the prompt and its answer still names the skill of
+	// the prompt.
+	newest, err := store.ListMessages(t.Context(), testOwner, item.ID, conversation.MessageQuery{Limit: 1})
+	if err != nil || len(newest.Messages) != 1 || newest.Messages[0].Role != "assistant" {
+		t.Fatalf("newest = %+v, %v", newest, err)
+	}
+	older, err := store.ListMessages(t.Context(), testOwner, item.ID, conversation.MessageQuery{Before: newest.NextCursor, Limit: 1})
+	if err != nil || len(older.Messages) != 1 || older.Messages[0].Role != "user" || older.Messages[0].Skill != "node-maintenance" {
+		t.Fatalf("older = %+v, %v", older, err)
+	}
+}
+
+// A turn suspended on a confirmation, then resumed on a run that loads the
+// skill again, names the skill its prompt asked, from its first run.
+func TestDisplayMessagesServeTheSkillAskedOfAResumedTurn(t *testing.T) {
+	store, _ := openTestStore(t, Config{})
+	item := testConversation("conversation-1", testOwner, testNow)
+	if err := store.CreateConversation(t.Context(), item); err != nil {
+		t.Fatal(err)
+	}
+	at := testNow.Add(time.Second)
+	if _, err := store.BeginTurn(t.Context(), testOwner, item.ID, "turn-1", at); err != nil {
+		t.Fatal(err)
+	}
+	skill := conversation.RunSkill{Name: "node-maintenance", URI: "skill://node-maintenance/SKILL.md", SHA256: "sha256:01"}
+	asked := skill
+	asked.Asked = true
+	pending := conversation.PendingConfirmation{
+		ConversationID: item.ID, TurnID: "turn-1", ConfirmationID: "confirmation-1",
+		ToolName: "stop_object", Arguments: json.RawMessage(`{"path":"web"}`), ArgumentsHash: "hash", State: []byte(`{"messages":[]}`),
+		CreatedAt: at, ExpiresAt: at.Add(10 * time.Minute), Run: conversation.TurnRun{Model: "m", Skills: []conversation.RunSkill{asked}},
+	}
+	if err := store.SuspendTurn(t.Context(), testOwner, pending); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ClaimConfirmation(t.Context(), testOwner, item.ID, "turn-1", "confirmation-1", at.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	messages := []llm.Message{{Role: llm.RoleUser, Text: "on n1"}, {Role: llm.RoleAssistant, Text: "Stopped."}}
+	resumed := conversation.TurnRun{Model: "m", Skills: []conversation.RunSkill{skill}}
+	if err := store.CompleteTurn(t.Context(), testOwner, item.ID, "turn-1", at.Add(time.Minute), at.Add(time.Hour), messages, resumed, conversation.TurnTiming{}); err != nil {
+		t.Fatal(err)
+	}
+	page, err := store.ListMessages(t.Context(), testOwner, item.ID, conversation.MessageQuery{})
+	if err != nil || len(page.Messages) != 2 || page.Messages[0].Skill != "node-maintenance" || page.Messages[1].Skill != "" {
+		t.Fatalf("page = %+v, %v", page, err)
 	}
 }
 

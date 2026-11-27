@@ -86,7 +86,8 @@ func TestAskedSkillIsLoadedBeforeTheModel(t *testing.T) {
 	if len(result.Messages) != 6 || result.Messages[5].Role != llm.RoleAssistant || len(result.Messages[5].ToolCalls) != 0 {
 		t.Fatalf("messages = %+v", result.Messages)
 	}
-	if len(result.Exposure.Skills) != 1 || result.Exposure.Skills[0].Name != "node-maintenance" {
+	// Recorded as asked, for the history to name it on the prompt.
+	if len(result.Exposure.Skills) != 1 || result.Exposure.Skills[0].Name != "node-maintenance" || !result.Exposure.Skills[0].Asked {
 		t.Fatalf("skills = %+v", result.Exposure.Skills)
 	}
 
@@ -262,5 +263,23 @@ func TestValidSkillName(t *testing.T) {
 		if ValidSkillName(name) {
 			t.Errorf("%q taken", name)
 		}
+	}
+}
+
+// The model loading again, in the same turn, the skill the client asked
+// leaves it recorded once, as asked.
+func TestAskedSkillLoadedAgainByTheModelStaysAsked(t *testing.T) {
+	session := crowdedSkillSession()
+	model := &scriptedLLM{t: t, steps: []llmStep{
+		callsStep(llm.ToolCall{ID: "call-1", Name: LoadSkillToolName, Arguments: json.RawMessage(`{"skill":"node-maintenance"}`)}),
+		answerStep(t, nil),
+	}}
+	ctx := WithSkill(auth.WithBearerToken(t.Context(), "jwt-marker"), "node-maintenance")
+	result, err := searchAgent(t, model, session, Config{}).RunTurn(ctx, nil, "/node-maintenance", func(Event) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Exposure.Skills) != 1 || !result.Exposure.Skills[0].Asked {
+		t.Fatalf("skills = %+v", result.Exposure.Skills)
 	}
 }

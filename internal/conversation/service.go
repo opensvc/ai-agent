@@ -214,9 +214,15 @@ type TurnExecution interface {
 	// resumed turn, its messages so far; and the number of the turns the
 	// bound of the history left out.
 	Snapshot() (messages []llm.Message, ids []string, stored int, omitted int)
+	// AskedSkill is the skill the message of the user of a resumed turn
+	// asked, as its runs recorded it; empty for a new turn, whose request
+	// names it, and for a turn that asked none.
+	AskedSkill() string
 }
 
 func (t *PreparedTurn) TurnID() string { return t.turnID }
+
+func (t *PreparedTurn) AskedSkill() string { return t.askedSkill }
 
 // PromptID is the ID the message of the user of the turn goes by: the one
 // the client gave it, or <turn ID>:1.
@@ -352,9 +358,10 @@ func (s *Service) PrepareConfirmation(ctx context.Context, identity auth.Identit
 	if err != nil {
 		return nil, errors.Join(err, s.failTurn(item.Owner, item.ID, turnID, TurnFailed, "history_invalid"))
 	}
+	promptID, askedSkill := s.turnPrompt(ctx, item.Owner, item.ID, turnID)
 	return &PreparedTurn{
 		service: s, owner: item.Owner, conversationID: item.ID, turnID: turnID,
-		history: history, historyIDs: historyIDs[len(historyIDs)-len(history):], historyStats: stats, promptID: s.turnPromptID(ctx, item.Owner, item.ID, turnID), resume: &state, decision: decision,
+		history: history, historyIDs: historyIDs[len(historyIDs)-len(history):], historyStats: stats, promptID: promptID, askedSkill: askedSkill, resume: &state, decision: decision,
 		timing: pending.Timing,
 	}, nil
 }
@@ -441,9 +448,10 @@ func (s *Service) PrepareClientResults(ctx context.Context, identity auth.Identi
 	if err != nil {
 		return nil, errors.Join(err, s.failTurn(item.Owner, item.ID, pending.TurnID, TurnFailed, "history_invalid"))
 	}
+	promptID, askedSkill := s.turnPrompt(ctx, item.Owner, item.ID, pending.TurnID)
 	return &PreparedTurn{
 		service: s, owner: item.Owner, conversationID: item.ID, turnID: pending.TurnID,
-		history: history, historyIDs: historyIDs[len(historyIDs)-len(history):], historyStats: stats, promptID: s.turnPromptID(ctx, item.Owner, item.ID, pending.TurnID), resume: &state,
+		history: history, historyIDs: historyIDs[len(historyIDs)-len(history):], historyStats: stats, promptID: promptID, askedSkill: askedSkill, resume: &state,
 		timing: pending.Timing,
 	}, nil
 }
@@ -503,7 +511,9 @@ type PreparedTurn struct {
 	historyIDs []string
 	// promptID is the ID the client gave the message of the user of the
 	// turn, empty when it gave none.
-	promptID     string
+	promptID string
+	// askedSkill is the skill the prompt of a resumed turn asked.
+	askedSkill   string
 	historyStats *HistoryStats
 	resume       *agent.SuspendedTurn
 	decision     agent.Decision
@@ -863,10 +873,13 @@ func boundHistory(history []llm.Message, maxMessages int, maxBytes int) ([]llm.M
 
 // turnPromptID reads the ID the client gave the prompt of a turn, none when
 // it cannot be read: the message is then named <turn ID>:1.
-func (s *Service) turnPromptID(ctx context.Context, owner Owner, conversationID, turnID string) string {
+// turnPrompt is the ID the client gave the message of the user of a turn,
+// and the skill it asked, as the runs of the turn recorded it; empty when
+// the turn cannot be read, the message then going by <turn ID>:1.
+func (s *Service) turnPrompt(ctx context.Context, owner Owner, conversationID, turnID string) (string, string) {
 	turn, _, err := s.store.TurnMessages(ctx, owner, conversationID, turnID)
 	if err != nil {
-		return ""
+		return "", ""
 	}
-	return turn.PromptID
+	return turn.PromptID, AskedSkill(turn.Runs)
 }

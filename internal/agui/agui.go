@@ -70,13 +70,15 @@ type Event struct {
 }
 
 // SnapshotMessage is an AG-UI message of a snapshot: a message of the user,
-// of the assistant with its tool calls, or of a tool.
+// of the assistant with its tool calls, or of a tool. Skill, on a message of
+// the user, names the skill the client asked with it, as the history does.
 type SnapshotMessage struct {
 	ID         string             `json:"id"`
 	Role       string             `json:"role"`
 	Content    *string            `json:"content,omitempty"`
 	ToolCalls  []SnapshotToolCall `json:"toolCalls,omitempty"`
 	ToolCallID string             `json:"toolCallId,omitempty"`
+	Skill      string             `json:"skill,omitempty"`
 }
 
 type SnapshotToolCall struct {
@@ -241,9 +243,10 @@ func (e *Encoder) messageID(iteration int) string {
 
 // Snapshot gives the thread as the agent holds it: the messages with their
 // IDs, then current, the message of the user the run starts from, unless
-// nil. Beyond 1 MiB the oldest turns are left out, which its metadata
+// nil. skills names, by their ID, the skill the messages of the user among
+// them asked. Beyond 1 MiB the oldest turns are left out, which its metadata
 // counts with the turns the bound of the history left out.
-func (e *Encoder) Snapshot(messages []llm.Message, ids []string, current *SnapshotMessage, omitted int) ([]Event, error) {
+func (e *Encoder) Snapshot(messages []llm.Message, ids []string, current *SnapshotMessage, omitted int, skills map[string]string) ([]Event, error) {
 	if len(messages) != len(ids) {
 		return nil, fmt.Errorf("AG-UI snapshot messages and IDs differ in number")
 	}
@@ -252,7 +255,7 @@ func (e *Encoder) Snapshot(messages []llm.Message, ids []string, current *Snapsh
 		if message.Role == llm.RoleUser || len(turns) == 0 {
 			turns = append(turns, nil)
 		}
-		turns[len(turns)-1] = append(turns[len(turns)-1], snapshotMessages(message, ids[index])...)
+		turns[len(turns)-1] = append(turns[len(turns)-1], snapshotMessages(message, ids[index], skills[ids[index]])...)
 	}
 	for {
 		thread := make([]SnapshotMessage, 0)
@@ -278,8 +281,9 @@ func (e *Encoder) Snapshot(messages []llm.Message, ids []string, current *Snapsh
 }
 
 // snapshotMessages gives a message of the history as AG-UI messages: a
-// message of tools is one message per result, as the stream gives them.
-func snapshotMessages(message llm.Message, id string) []SnapshotMessage {
+// message of tools is one message per result, as the stream gives them; a
+// message of the user names the skill it asked.
+func snapshotMessages(message llm.Message, id string, skill string) []SnapshotMessage {
 	switch message.Role {
 	case llm.RoleTool:
 		results := make([]SnapshotMessage, 0, len(message.ToolResults))
@@ -304,7 +308,7 @@ func snapshotMessages(message llm.Message, id string) []SnapshotMessage {
 		return []SnapshotMessage{item}
 	}
 	text := message.Text
-	return []SnapshotMessage{{ID: id, Role: "user", Content: &text}}
+	return []SnapshotMessage{{ID: id, Role: "user", Content: &text, Skill: skill}}
 }
 
 func (e *Encoder) closeText() []Event {

@@ -190,6 +190,12 @@ offers none.
 - The agent tells the load as a step, `load_skill` and the skill, before the
   answer, and keeps it in the history; a load refused ends with an error
   result before the `RUN_ERROR`.
+- Show the skill on the message of the user that asked it, a tag over its
+  words, the words hidden when they are `/` and its name alone: as it is
+  sent, then from the `skill` of that message in `GET …/messages`, and of a
+  `MESSAGES_SNAPSHOT` for the prompt of the run and the one of the turn it
+  resumes; a snapshot names no skill on the earlier prompts, which keep the
+  one of the history, by their ID.
 - On `RUN_ERROR` `skill_unavailable`, the skill is no longer served to the
   user, or could not be loaded: read the list again, tell the user, and keep
   their prompt for them to send it again. On 400 `invalid_skill`, the client

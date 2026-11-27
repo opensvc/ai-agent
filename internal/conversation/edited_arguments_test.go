@@ -93,3 +93,37 @@ func TestServiceRefusesAnEditOfACallWithoutSchema(t *testing.T) {
 		t.Fatalf("a call without schema took an edit: %v", err)
 	}
 }
+
+// skillRunner suspends a turn whose prompt asked a skill, the agent loading it.
+type skillRunner struct{ editableRunner }
+
+func (r *skillRunner) RunTurn(ctx context.Context, history []llm.Message, prompt string, emit agent.EmitFunc) (agent.TurnResult, error) {
+	result, err := r.editableRunner.RunTurn(ctx, history, prompt, emit)
+	result.Exposure.Skills = []agent.LoadedSkill{{Name: "node-maintenance", URI: "skill://node-maintenance/SKILL.md", Digest: "sha256:01", Asked: true}}
+	return result, err
+}
+
+// A turn resumed after its confirmation knows the skill its prompt asked, for
+// the snapshot to name it; a new turn knows none, its request names it.
+func TestServiceResumesKnowingTheSkillAsked(t *testing.T) {
+	store := newServiceTestStore()
+	service := newTestService(t, store, &skillRunner{})
+	execution, err := service.PrepareTurn(t.Context(), serviceTestIdentity(), store.item.ID, "stop web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if execution.AskedSkill() != "" {
+		t.Fatalf("a new turn knows a skill: %q", execution.AskedSkill())
+	}
+	var request *agent.Confirmation
+	if err := execution.Run(t.Context(), func(event agent.Event) error { request = event.Confirmation; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	resumed, err := service.PrepareConfirmation(t.Context(), serviceTestIdentity(), store.item.ID, request.TurnID, request.ID, agent.DecisionReject, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumed.AskedSkill() != "node-maintenance" {
+		t.Fatalf("asked = %q", resumed.AskedSkill())
+	}
+}

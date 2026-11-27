@@ -182,11 +182,27 @@ func (r TurnRun) Equal(other TurnRun) bool {
 }
 
 // RunSkill is a skill a run loaded: its name, the URI of its SKILL.md and
-// the "sha256:<hex>" digest of the text loaded.
+// the "sha256:<hex>" digest of the text loaded; Asked when the client asked
+// it with the prompt, the agent loading it first.
 type RunSkill struct {
 	Name   string `json:"name"`
 	URI    string `json:"uri"`
 	SHA256 string `json:"sha256"`
+	Asked  bool   `json:"asked,omitempty"`
+}
+
+// AskedSkill is the name of the skill the client asked with the prompt of
+// a turn of these runs, the first; empty when it asked none.
+func AskedSkill(runs []TurnRun) string {
+	if len(runs) == 0 {
+		return ""
+	}
+	for _, skill := range runs[0].Skills {
+		if skill.Asked {
+			return skill.Name
+		}
+	}
+	return ""
 }
 
 // AgentInfo describes the agent of a backend: its version.
@@ -262,7 +278,7 @@ func MessageID(turnID, promptID string, sequence int64) string {
 func runSkills(loaded []agent.LoadedSkill) []RunSkill {
 	var skills []RunSkill
 	for _, skill := range loaded {
-		skills = append(skills, RunSkill{Name: skill.Name, URI: skill.URI, SHA256: skill.Digest})
+		skills = append(skills, RunSkill{Name: skill.Name, URI: skill.URI, SHA256: skill.Digest, Asked: skill.Asked})
 	}
 	return skills
 }
