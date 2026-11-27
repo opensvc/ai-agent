@@ -1550,6 +1550,10 @@
           "model_id": {
             "type": "string",
             "description": "On the last assistant message of a turn, the ID of the model the turn last ran on, for the client to offer it again; absent for a turn recorded before runs had it."
+          },
+          "skill": {
+            "type": "string",
+            "description": "On the message of the user that starts a turn, the name of the skill the client asked with it, which the agent loaded first; absent when it asked none, or for a turn recorded before runs had it."
           }
         }
       },

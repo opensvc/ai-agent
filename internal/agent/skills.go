@@ -127,11 +127,13 @@ type SkillFile struct {
 }
 
 // LoadedSkill is a skill a turn loaded, for the record of what the model was
-// given: its name, the URI of its SKILL.md and the digest of the text loaded.
+// given: its name, the URI of its SKILL.md and the digest of the text loaded;
+// Asked when the client asked it, the agent loading it first.
 type LoadedSkill struct {
 	Name   string
 	URI    string
 	Digest string
+	Asked  bool
 }
 
 // skillShelf holds the skills a turn may load and the tool that loads them;
@@ -391,7 +393,7 @@ func (s *skillShelf) load(ctx context.Context, session MCPSession, backend strin
 		}
 	}
 	if !slices.ContainsFunc(s.loaded, func(loaded LoadedSkill) bool { return loaded.URI == skill.URI }) {
-		s.loaded = append(s.loaded, LoadedSkill{Name: arguments.Skill, URI: skill.URI, Digest: digest})
+		s.loaded = append(s.loaded, LoadedSkill{Name: arguments.Skill, URI: skill.URI, Digest: digest, Asked: asked})
 	}
 	origin := "the backend"
 	if backend != "" {

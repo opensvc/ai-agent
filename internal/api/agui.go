@@ -129,6 +129,8 @@ func serveConversationRun(backend string, service ConversationService, models *l
 		// prompt is the message of the user a new turn starts from, and
 		// promptID the ID the client gave it.
 		var prompt, promptID string
+		// The skill a new prompt asks, which a snapshot names on it.
+		var askedSkill string
 		switch {
 		case len(input.Resume) > 0:
 			entry := input.Resume[0]
@@ -254,6 +256,7 @@ func serveConversationRun(backend string, service ConversationService, models *l
 				runContext = agent.WithSkill(runContext, skill)
 				attributes = append(attributes, slog.String("skill", skill))
 			}
+			askedSkill = skill
 			text, skipped, err := input.Prompt()
 			prompt = text
 			if err != nil {
@@ -311,11 +314,18 @@ func serveConversationRun(backend string, service ConversationService, models *l
 			}
 		}
 		if !inPhaseClient {
+			// The prompt the run starts from, and the one of the turn it
+			// resumes, name the skill they asked; the earlier ones are those
+			// of the history.
 			var current *agui.SnapshotMessage
 			if prompt != "" {
-				current = &agui.SnapshotMessage{ID: execution.PromptID(), Role: "user", Content: &prompt}
+				current = &agui.SnapshotMessage{ID: execution.PromptID(), Role: "user", Content: &prompt, Skill: askedSkill}
 			}
-			snapshot, err := codec.encoder.Snapshot(messages, ids, current, omitted)
+			var skills map[string]string
+			if resumed := execution.AskedSkill(); resumed != "" {
+				skills = map[string]string{execution.PromptID(): resumed}
+			}
+			snapshot, err := codec.encoder.Snapshot(messages, ids, current, omitted, skills)
 			if err != nil {
 				_ = execution.Cancel("snapshot_failed")
 				writeJSONError(response, http.StatusInternalServerError, "snapshot_failed", "the thread could not be given")

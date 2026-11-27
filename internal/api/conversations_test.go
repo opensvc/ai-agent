@@ -361,10 +361,14 @@ type testTurnExecution struct {
 	promptID   string
 	history    []llm.Message
 	historyIDs []string
-	// current and currentIDs are the messages of a resumed turn so far.
+	// current and currentIDs are the messages of a resumed turn so far,
+	// and askedSkill the skill its prompt asked.
 	current    []llm.Message
 	currentIDs []string
+	askedSkill string
 }
+
+func (e *testTurnExecution) AskedSkill() string { return e.askedSkill }
 
 func (e *testTurnExecution) TurnID() string {
 	if e.turnID == "" {

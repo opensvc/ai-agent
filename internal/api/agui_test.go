@@ -508,3 +508,50 @@ func TestRunResumesWithTheEditedArguments(t *testing.T) {
 		t.Fatalf("audit = %s", output.String())
 	}
 }
+
+// The snapshot names the skill the prompt of the run asked, and the one of
+// the turn a run resumes, as the history names them.
+func TestRunSnapshotNamesTheSkillsAsked(t *testing.T) {
+	history := []llm.Message{{Role: llm.RoleUser, Text: "nodes?"}, {Role: llm.RoleAssistant, Text: "Two nodes."}}
+	completes := func(_ context.Context, emit agent.EmitFunc) error {
+		return emit(agent.Event{Type: agent.EventCompleted, FinishReason: llm.FinishReasonCompleted, TurnID: "turn-2", Iteration: 2})
+	}
+	state := `{"messages":[],"iteration":1,"calls":[{"ID":"call-7","Name":"stop_object","Arguments":{}}],"results":[]}`
+	service := conversationServiceFuncs{
+		prepare: func(context.Context, auth.Identity, string, string) (conversation.TurnExecution, error) {
+			return &testTurnExecution{turnID: "turn-2", history: history, historyIDs: []string{"turn-1:1", "turn-1:2"}, run: completes}, nil
+		},
+		pending: func(context.Context, auth.Identity, string) (*conversation.PendingConfirmation, error) {
+			return &conversation.PendingConfirmation{TurnID: "turn-2", ConfirmationID: "confirmation-id", ToolName: "stop_object", State: []byte(state)}, nil
+		},
+		confirm: func(context.Context, auth.Identity, string, string, string, agent.Decision) (conversation.TurnExecution, error) {
+			return &testTurnExecution{turnID: "turn-2", history: history, historyIDs: []string{"turn-1:1", "turn-1:2"}, askedSkill: "node-maintenance",
+				current:    []llm.Message{{Role: llm.RoleUser, Text: "on n1"}, {Role: llm.RoleAssistant, ToolCalls: []llm.ToolCall{{ID: "call-7", Name: "stop_object", Arguments: json.RawMessage(`{}`)}}}},
+				currentIDs: []string{"turn-2:1", "turn-2:2"}, run: completes}, nil
+		},
+	}
+	skillsOf := func(body string) map[string]any {
+		events := aguiEvents(t, body)
+		skills := map[string]any{}
+		for _, event := range events {
+			if event["type"] != "MESSAGES_SNAPSHOT" {
+				continue
+			}
+			for _, message := range event["messages"].([]any) {
+				item := message.(map[string]any)
+				if item["role"] == "user" {
+					skills[item["id"].(string)] = item["skill"]
+				}
+			}
+		}
+		return skills
+	}
+	asked := runRequest(t, service, `{"threadId":"conversation-id","runId":"run-2","messages":[{"id":"client-1","role":"user","content":"on n1"}],"forwardedProps":{"skill":"node-maintenance"}}`)
+	if got := skillsOf(asked.Body.String()); len(got) != 2 || got["turn-1:1"] != nil || got["turn-2:1"] != "node-maintenance" {
+		t.Fatalf("new prompt: skills = %v, body %s", got, asked.Body.String())
+	}
+	resumed := runRequest(t, service, `{"threadId":"conversation-id","runId":"run-3","messages":[],"resume":[{"interruptId":"confirmation-id","status":"resolved","payload":{"approved":true}}]}`)
+	if got := skillsOf(resumed.Body.String()); len(got) != 2 || got["turn-1:1"] != nil || got["turn-2:1"] != "node-maintenance" {
+		t.Fatalf("resumed: skills = %v, body %s", got, resumed.Body.String())
+	}
+}

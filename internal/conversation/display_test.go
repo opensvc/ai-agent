@@ -195,3 +195,26 @@ func TestServiceStartsARejectedCallWithTheRunOfItsDecision(t *testing.T) {
 		t.Fatalf("rejected = %+v", rejected)
 	}
 }
+
+// A run keeps which skill the client asked, and the history names it on the
+// prompt from the first run only: a skill the model loaded is not asked.
+func TestRunsKeepTheSkillAsked(t *testing.T) {
+	result := agent.TurnResult{Exposure: agent.Exposure{Skills: []agent.LoadedSkill{
+		{Name: "node-maintenance", URI: "skill://node-maintenance/SKILL.md", Digest: "sha256:01", Asked: true},
+		{Name: "morning-check", URI: "skill://morning-check/SKILL.md", Digest: "sha256:00"},
+	}}}
+	run := NewAgentInfo("v1").run(result, nil)
+	if len(run.Skills) != 2 || !run.Skills[0].Asked || run.Skills[1].Asked {
+		t.Fatalf("skills = %+v", run.Skills)
+	}
+	if got := AskedSkill([]TurnRun{run}); got != "node-maintenance" {
+		t.Fatalf("asked = %q", got)
+	}
+	loaded := TurnRun{Skills: []RunSkill{{Name: "morning-check"}}}
+	if got := AskedSkill([]TurnRun{loaded, run}); got != "" {
+		t.Fatalf("asked by a later run = %q", got)
+	}
+	if got := AskedSkill(nil); got != "" {
+		t.Fatalf("asked of no run = %q", got)
+	}
+}

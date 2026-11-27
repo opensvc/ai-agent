@@ -96,6 +96,20 @@ LIMIT ?`, conversation.MaxMessagePageBytes, id, beforeTurn, beforeTurn, beforeMe
 	var oldest string
 	more := false
 	stepped := map[string]bool{}
+	// The turn last read, for its steps and its skill asked: the messages of
+	// a turn come together, so that each turn is read once.
+	var lastTurn conversation.Turn
+	turnOf := func(turnID string) (conversation.Turn, error) {
+		if lastTurn.ID == turnID {
+			return lastTurn, nil
+		}
+		turn, err := getTurn(ctx, tx, id, turnID)
+		if err != nil {
+			return conversation.Turn{}, err
+		}
+		lastTurn = turn
+		return turn, nil
+	}
 	for _, candidate := range candidates {
 		if len(page.Messages) == limit {
 			more = true
@@ -108,7 +122,7 @@ LIMIT ?`, conversation.MaxMessagePageBytes, id, beforeTurn, beforeTurn, beforeMe
 		cut := query.Before != "" && candidate.turnSequence == beforeTurn
 		if item.Role == "assistant" && !stepped[item.TurnID] && !cut {
 			stepped[item.TurnID] = true
-			turn, err := getTurn(ctx, tx, id, item.TurnID)
+			turn, err := turnOf(item.TurnID)
 			if err != nil {
 				return conversation.MessagePage{}, err
 			}
@@ -120,6 +134,14 @@ LIMIT ?`, conversation.MaxMessagePageBytes, id, beforeTurn, beforeTurn, beforeMe
 			if last := len(turn.Runs) - 1; last >= 0 {
 				item.ModelID = turn.Runs[last].ModelID
 			}
+		}
+		// The prompt of a turn names the skill the client asked with it.
+		if item.Role == "user" && candidate.messageSequence == 1 {
+			turn, err := turnOf(item.TurnID)
+			if err != nil {
+				return conversation.MessagePage{}, err
+			}
+			item.Skill = conversation.AskedSkill(turn.Runs)
 		}
 		encoded, err := json.Marshal(item)
 		if err != nil {

@@ -189,7 +189,10 @@ Only one turn runs at a time in a conversation.
   when the message holds in no page with its steps. It carries the
   `runs` of the turn too, `started_at` and `ended_at`, the waits for a
   decision left out, its `usage`, `total_tokens`, and its `model_id`, the
-  model the turn last ran on, absent for a turn recorded before. Times are milliseconds
+  model the turn last ran on, absent for a turn recorded before. The message
+  of the user that starts a turn carries `skill`, the name of the skill the
+  client asked with it (see [Asked skills](#asked-skills)), absent when it
+  asked none or for a turn recorded before. Times are milliseconds
   of the clock of the agent, the timestamps the stream carried; a turn
   stored before they were has none, its steps in their order. A turn waiting
   on a confirmation is not in the history: its steps come back with the
@@ -463,7 +466,11 @@ the prompt therefore goes, and is stored, under `<turn ID>:1`, which the
 client does not hold: the client drops its copy and adds the snapshot's
 after the turns it lacked. Beyond 1 MiB, the oldest turns are left out, and `metadata`
 `{"opensvc.truncated": {"omittedTurns": n}}` counts them with the turns
-the bound of the history leaves out.
+the bound of the history leaves out. The prompt of the run, and the one of
+the turn it resumes, carry `skill`, the name of the skill the client asked
+with it (see [Asked skills](#asked-skills)), an extension of the user
+message of AG-UI; the prompts of the earlier turns do not: the history names
+theirs, under the same IDs.
 
 ### Client tools
 
@@ -887,6 +894,11 @@ interface, rather than leave the model to choose one:
 - The prompt is required as for any run: a client sending a skill without
   words sends a text of its own, such as `/morning-check`, which the user
   sees as their message.
+- The history names the skill asked on the message of the user that started
+  the turn, `skill` in `GET /v1/{backend}/conversations/{id}/messages`, for a
+  client to show it with the prompt once the conversation is read again; a
+  skill the model loaded by itself is not named there, its step tells it.
+  The record of the run marks it `asked` among the skills it loaded.
 
 A text read is a tool result: in the next turns, the history keeps no
 string longer than 256 bytes, so that a reference is read again in the
@@ -1099,7 +1111,8 @@ results, each truncated. It also records what executed the turn, as the
 turn recorded it while it ran: the agent version, the model, a hash of the
 system prompt actually sent, whether the tool catalog was searched and the
 tools shown to the model, the skills it loaded, each with the URI of its
-`SKILL.md` and the SHA-256 digest of the text the model was given, and the
+`SKILL.md`, the SHA-256 digest of the text the model was given and
+`asked` when the client asked it, and the
 MCP server, with the name and version it announced
 and a hash of the tools it listed, which changes with any tool name,
 description, schema or annotation. A turn resumed after a confirmation on a
